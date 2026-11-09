@@ -75,7 +75,7 @@ class SpectralDatabase:
 
     def _secure_sqlite_files(self):
         """Keep the database and SQLite sidecar files owner-only on POSIX."""
-        if self.path == ":memory:" or not hasattr(os, "chmod"):
+        if self.path == ":memory:" or os.name != "posix":
             return
         for candidate in (self.path, self.path + "-journal", self.path + "-wal", self.path + "-shm"):
             try:

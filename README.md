@@ -66,6 +66,9 @@ python -m spectral_monitor.server --token-file monitor.token --path external-dia
 To enable forwarding from the internal monitor, construct it with an HTTPS endpoint (or the loopback receiver URL) and a bearer token:
 
 ```python
+import os
+from spectral_core import DiagnosticMonitor
+
 monitor = DiagnosticMonitor(
     "~/.spectral-core/diagnostics.jsonl",
     external_endpoint="http://127.0.0.1:8765/v1/reports",

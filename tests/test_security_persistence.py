@@ -2,6 +2,7 @@ import os
 import stat
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from spectral_core.address import SpectralAddress
@@ -25,6 +26,23 @@ class PersistentReplayProtectionTests(unittest.TestCase):
             self.assertFalse(reopened.claim_packet("packet-1", "123", now=102))
             self.assertTrue(reopened.claim_packet("packet-1", "123", now=105))
             reopened.close()
+
+    def test_concurrent_connections_accept_packet_id_only_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "core.sqlite3"
+            setup = SpectralDatabase(path)
+            setup.close()
+
+            def claim(_):
+                database = SpectralDatabase(path)
+                try:
+                    return database.claim_packet("same-packet", "123")
+                finally:
+                    database.close()
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results = list(executor.map(claim, range(8)))
+            self.assertEqual(sum(results), 1)
 
     def test_file_backed_database_is_owner_only_on_posix(self):
         if os.name != "posix":

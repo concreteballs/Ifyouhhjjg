@@ -28,3 +28,6 @@ Please do not publish exploit details in a public issue. Contact the repository 
 
 
 Diagnostic retention is bounded: the internal JSONL archive rotates by size (5 MiB, three backups by default), the external collector archive also rotates (5 MiB, three backups by default), and the pending external spool has a 10 MiB hard cap. If the spool is full, new pending reports are dropped rather than growing the disk indefinitely; the internal monitor exposes this count as `external_spool_dropped`. Operators must monitor that counter if external forwarding is enabled.
+
+
+The SQLite layer exposes `backup_to(path)` for an atomic, owner-only backup, including endpoint data and packet replay receipts. This is a backup primitive, not a complete recovery policy: restore drills, retention, off-device storage, and encryption/key custody remain deployment responsibilities and are not implemented by the emulator.

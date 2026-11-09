@@ -1,5 +1,7 @@
 """Router graph with tail-first responsibility regions and bounded route corrections."""
 from dataclasses import dataclass, field
+import heapq
+import math
 import time
 from typing import Dict, List, Optional, Tuple
 from .address import SpectralAddress
@@ -16,7 +18,7 @@ class Router:
     load: float = 0.0
     available: bool = True
     def __post_init__(self):
-        if not self.router_id or self.load < 0:
+        if not self.router_id or not math.isfinite(self.load) or self.load < 0:
             raise ValueError("invalid router ID or load")
         if any(not p or any(c not in "0123456789" for c in p) for p in self.responsibility_prefixes):
             raise ValueError("responsibility prefixes must be decimal strings")
@@ -34,6 +36,8 @@ class SpectralNetwork:
         self.routers: Dict[str, Router] = {}
         self.endpoints: Dict[SpectralAddress, str] = {}
         self.monitor = monitor
+        if not math.isfinite(correction_ttl_seconds) or correction_ttl_seconds <= 0:
+            raise ValueError("correction_ttl_seconds must be finite and positive")
         self.correction_ttl_seconds = correction_ttl_seconds
         self._corrections = {}
         self._route_hints = {}
@@ -104,7 +108,7 @@ class SpectralNetwork:
         self._event("router_availability", router_id=router_id, available=bool(available))
 
     def set_load(self, router_id, load):
-        if load < 0: raise ValueError("router load cannot be negative")
+        if not math.isfinite(load) or load < 0: raise ValueError("router load must be finite and non-negative")
         self.routers[router_id].load = float(load)
         self._event("router_load", router_id=router_id, load=float(load))
 
@@ -133,25 +137,44 @@ class SpectralNetwork:
         raise RuntimeError(f"No route from {source} to {destination}")
 
     def shortest_paths(self, source, destination, excluded=None):
-        first = self.shortest_path(source, destination, excluded)
-        distance, found = len(first)-1, []
-        def visit(path):
-            node = path[-1]
-            if node == destination:
-                if len(path)-1 == distance: found.append(path)
-                return
-            if len(path)-1 >= distance: return
-            for nxt in sorted(self.routers[node].neighbours):
-                if nxt in path or not self.routers[nxt].available or frozenset((node,nxt)) in set(excluded or ()): continue
-                try: rem = self.shortest_path(nxt, destination, excluded)
-                except RuntimeError: continue
-                if len(path)+len(rem)-2 == distance: visit(path+[nxt])
-        visit([source])
-        return found or [first]
+        """Compatibility helper returning one deterministic shortest path.
+
+        Enumerating every shortest path can grow exponentially on grid-like graphs.
+        Use choose_path() for load-aware deterministic selection.
+        """
+        return [self.shortest_path(source, destination, excluded)]
 
     def choose_path(self, source, destination, excluded=None):
-        paths = self.shortest_paths(source, destination, excluded)
-        return min(paths, key=lambda p: (sum(self.routers[x].load for x in p[1:-1]), tuple(p)))
+        excluded = set(excluded or ())
+        if source not in self.routers or destination not in self.routers:
+            raise KeyError("Unknown router")
+        if not self.routers[source].available or not self.routers[destination].available:
+            raise RuntimeError("Source or destination unavailable")
+        if source == destination:
+            return [source]
+        # Lexicographic Dijkstra: hop count first, then accumulated intermediate
+        # router load, then router-ID sequence for deterministic tie breaking.
+        start_key = (0, 0.0, (source,))
+        best = {source: start_key}
+        queue = [(start_key, source)]
+        while queue:
+            key, current = heapq.heappop(queue)
+            if best.get(current) != key:
+                continue
+            if current == destination:
+                return list(key[2])
+            hops, load_cost, route = key
+            for nxt in sorted(self.routers[current].neighbours):
+                if nxt in route or not self.routers[nxt].available:
+                    continue
+                if frozenset((current, nxt)) in excluded:
+                    continue
+                next_load = load_cost + (0.0 if nxt == destination else self.routers[nxt].load)
+                next_key = (hops + 1, next_load, route + (nxt,))
+                if nxt not in best or next_key < best[nxt]:
+                    best[nxt] = next_key
+                    heapq.heappush(queue, (next_key, nxt))
+        raise RuntimeError(f"No route from {source} to {destination}")
 
     def choose_next_hop(self, current, destination, address=None, previous_router=None):
         expected = self.choose_path(current, destination)[1] if current != destination else current

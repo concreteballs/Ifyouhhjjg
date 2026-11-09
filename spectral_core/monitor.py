@@ -6,13 +6,16 @@ are deliberately never accepted by the monitor API.
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
+from collections import deque
 import threading
 import time
 import uuid
 import urllib.request
 import urllib.parse
+import urllib.error
 from pathlib import Path
 from typing import Any, Optional
 
@@ -40,8 +43,13 @@ ALLOWED_EVENTS = {
 }
 FORBIDDEN_KEYS = {
     "payload", "content", "token", "secret", "password", "private_key",
-    "authorization", "api_key",
+    "authorization", "api_key", "access_token",
 }
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class DiagnosticMonitor:
@@ -60,6 +68,10 @@ class DiagnosticMonitor:
             raise ValueError("Persistent report_path is required for external forwarding")
         if external_endpoint:
             parsed = urllib.parse.urlparse(external_endpoint)
+            if not parsed.hostname or parsed.query:
+                raise ValueError("External monitor URL must include a host and must not contain a query")
+            if parsed.username or parsed.password or parsed.fragment:
+                raise ValueError("External monitor URL must not contain credentials or fragments")
             if parsed.scheme != "https" and not (
                 parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
             ):
@@ -67,28 +79,33 @@ class DiagnosticMonitor:
             if not external_token:
                 raise ValueError("External monitor token is required when forwarding is enabled")
         self._lock = threading.RLock()
-        self._events: list[dict[str, Any]] = []
+        self._events = deque(maxlen=5000)
+        self._event_count = 0
         self._last_error: Optional[dict[str, Any]] = None
         self._started_at_ms = int(time.time() * 1000)
         self.emit("monitor_started", mode="persistent" if self.report_path else "memory")
 
     @staticmethod
     def _validate_data(data: dict[str, Any]) -> dict[str, Any]:
-        def check(value: Any, key: str = "") -> Any:
+        def check(value: Any, key: str = "", depth: int = 0) -> Any:
+            if depth > 8:
+                raise ValueError("Diagnostic nesting limit exceeded")
             if key.lower() in FORBIDDEN_KEYS:
                 raise ValueError(f"Diagnostic field is not allowed: {key}")
             if value is None or isinstance(value, (str, int, float, bool)):
+                if isinstance(value, float) and not math.isfinite(value):
+                    raise ValueError(f"Non-finite diagnostic number is not allowed: {key}")
                 if isinstance(value, str) and len(value) > 512:
                     raise ValueError(f"Diagnostic string is too long: {key}")
                 return value
             if isinstance(value, (list, tuple)):
                 if len(value) > 100:
                     raise ValueError(f"Diagnostic list is too large: {key}")
-                return [check(item, key) for item in value]
+                return [check(item, key, depth + 1) for item in value]
             if isinstance(value, dict):
                 if len(value) > 50:
                     raise ValueError(f"Diagnostic object is too large: {key}")
-                return {str(k): check(v, str(k)) for k, v in value.items()}
+                return {str(k): check(v, str(k), depth + 1) for k, v in value.items()}
             raise TypeError(f"Unsupported diagnostic value for {key}: {type(value).__name__}")
         if not isinstance(data, dict):
             raise TypeError("Diagnostic data must be an object")
@@ -114,14 +131,20 @@ class DiagnosticMonitor:
             raise ValueError("Diagnostic report exceeds 16 KiB")
         with self._lock:
             self._events.append(report)
+            self._event_count += 1
             if level in {"error", "critical"}:
                 self._last_error = report
             if self.report_path:
-                self.report_path.parent.mkdir(parents=True, exist_ok=True)
-                with self.report_path.open("a", encoding="utf-8") as handle:
-                    handle.write(encoded + "\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
+                self.report_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                fd = os.open(self.report_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                try:
+                    os.fchmod(fd, 0o600)
+                    with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
+                        handle.write(encoded + "\n")
+                        handle.flush()
+                        os.fsync(fd)
+                finally:
+                    os.close(fd)
         if self.external_endpoint:
             pending = self.external_spool_path.exists() and self.external_spool_path.stat().st_size > 0
             if pending:
@@ -140,46 +163,64 @@ class DiagnosticMonitor:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=2.0) as response:
+            opener = urllib.request.build_opener(_NoRedirect())
+            with opener.open(request, timeout=2.0) as response:
                 ack = json.loads(response.read(4096).decode("utf-8"))
                 return 200 <= response.status < 300 and ack.get("report_id") == report["report_id"] and ack.get("ok") is True
-        except (OSError, ValueError, TypeError):
+        except (OSError, urllib.error.URLError, ValueError, TypeError):
             return False
 
     def _spool_external(self, report: dict[str, Any]) -> None:
         if self.external_spool_path is None:
             return
-        self.external_spool_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.external_spool_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        with self._lock:
+            self.external_spool_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(self.external_spool_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
+                    handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+                    handle.flush()
+                    os.fsync(fd)
+            finally:
+                os.close(fd)
 
     def flush_external_spool(self) -> int:
         """Retry pending reports in order; keep the first unacknowledged record and tail."""
         if not self.external_endpoint or self.external_spool_path is None or not self.external_spool_path.is_file():
             return 0
-        lines = self.external_spool_path.read_text(encoding="utf-8").splitlines()
-        sent = 0
-        remaining = []
-        blocked = False
-        for line in lines:
-            if blocked:
-                remaining.append(line)
-                continue
+        with self._lock:
+            lines = self.external_spool_path.read_text(encoding="utf-8").splitlines()
+            sent = 0
+            remaining = []
+            blocked = False
+            for line in lines:
+                if blocked:
+                    remaining.append(line)
+                    continue
+                try:
+                    report = json.loads(line)
+                except ValueError:
+                    blocked = True
+                    remaining.append(line)
+                    continue
+                if self._forward_report(report):
+                    sent += 1
+                else:
+                    blocked = True
+                    remaining.append(line)
+            temporary = self.external_spool_path.with_suffix(".tmp")
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
-                report = json.loads(line)
-            except ValueError:
-                continue
-            if self._forward_report(report):
-                sent += 1
-            else:
-                blocked = True
-                remaining.append(line)
-        temporary = self.external_spool_path.with_suffix(".tmp")
-        temporary.write_text("".join(line + "\n" for line in remaining), encoding="utf-8")
-        os.replace(temporary, self.external_spool_path)
-        return sent
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
+                    handle.write("".join(line + "\n" for line in remaining))
+                    handle.flush()
+                    os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(temporary, self.external_spool_path)
+            return sent
 
     def record_exception(self, operation: str, error: Exception, **context: Any) -> None:
         self.emit(
@@ -187,7 +228,6 @@ class DiagnosticMonitor:
             level="error",
             operation=operation,
             error_type=type(error).__name__,
-            error_message=str(error)[:512],
             **context,
         )
 
@@ -241,7 +281,7 @@ class DiagnosticMonitor:
                 "schema": SCHEMA,
                 "status": "error" if self._last_error else "running",
                 "started_at_ms": self._started_at_ms,
-                "event_count": len(self._events),
+                "event_count": self._event_count,
                 "level_counts": counts,
                 "last_event": self._events[-1] if self._events else None,
                 "last_error": self._last_error,

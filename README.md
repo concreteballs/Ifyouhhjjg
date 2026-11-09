@@ -58,22 +58,27 @@ Reports remain local. There is no automatic upload to GitHub or another network 
 The external collector runs independently from the core process and accepts only allowlisted diagnostic reports. It never interprets reports as commands, rejects sensitive fields, deduplicates report IDs and acknowledges only after durable JSONL persistence. The optional HTTP receiver binds to loopback by default:
 
 ```bash
-python -m spectral_monitor.server --token "replace-with-a-long-random-token" --path external-diagnostics.jsonl
+python -c "import secrets; print(secrets.token_urlsafe(48))" > monitor.token
+chmod 600 monitor.token
+python -m spectral_monitor.server --token-file monitor.token --path external-diagnostics.jsonl
 ```
 
 To enable forwarding from the internal monitor, construct it with an HTTPS endpoint (or the loopback receiver URL) and a bearer token:
 
 ```python
+import os
+from spectral_core import DiagnosticMonitor
+
 monitor = DiagnosticMonitor(
     "~/.spectral-core/diagnostics.jsonl",
     external_endpoint="http://127.0.0.1:8765/v1/reports",
-    external_token="your-local-token",
+    external_token=os.environ["SPECTRAL_MONITOR_TOKEN"],
 )
 ```
 
-The receiver exposes read-only health at `GET /health` and report ingestion at `POST /v1/reports`. It has no command, file-path or arbitrary action endpoint.
+The receiver binds only to `127.0.0.1`; it cannot be configured to listen publicly. Its token must be stored in an owner-only file with at least 32 characters. The receiver exposes read-only health at `GET /health` and report ingestion at `POST /v1/reports`. It has no command, file-path or arbitrary action endpoint. For remote forwarding, place a separately managed HTTPS reverse proxy in front of the loopback service; do not expose the built-in HTTP server directly.
 
-## Run tests
+## Security and provenance\n\nSee [SECURITY.md](SECURITY.md) for the current security boundary and known limitations, and [PROVENANCE.md](PROVENANCE.md) for the runtime/CI dependency and licensing record. The repository currently has no public reuse license.\n\n## Run tests
 
 Python 3.10 or newer is recommended. No third-party packages are required.
 

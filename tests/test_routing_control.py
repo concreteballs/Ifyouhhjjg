@@ -1,4 +1,6 @@
 import tempfile
+from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
 from spectral_core import (
@@ -68,6 +70,43 @@ class RoutingControlTests(unittest.TestCase):
                 runtime.send(packet,authorization)
         finally:
             db.close()
+
+    def test_detour_authorization_rejects_tampering_and_expiry(self):
+        control = ControlPlane(b"z" * 32)
+        authorization = control.authorize_detour("packet-1", ["r0", "r1"])
+        tampered = replace(authorization, path=("r0", "r2"))
+        self.assertFalse(control.verify_detour(tampered, "packet-1"))
+        expired = replace(authorization, expires_at=0)
+        self.assertFalse(control.verify_detour(expired, "packet-1"))
+
+    def test_detour_nonce_is_one_use_under_concurrent_verification(self):
+        control = ControlPlane(b"z" * 32)
+        authorization = control.authorize_detour("packet-2", ["r0", "r1"])
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(
+                lambda _index: control.verify_detour(authorization, "packet-2"),
+                range(8),
+            ))
+        self.assertEqual(sum(results), 1)
+
+    def test_equal_length_route_choice_does_not_enumerate_all_paths(self):
+        network = SpectralNetwork()
+        width = 8
+        height = 8
+        for y in range(height):
+            for x in range(width):
+                rid = f"{x}-{y}"
+                network.add_router(Router(rid, (x, y)))
+        for y in range(height):
+            for x in range(width):
+                if x + 1 < width:
+                    network.connect(f"{x}-{y}", f"{x+1}-{y}")
+                if y + 1 < height:
+                    network.connect(f"{x}-{y}", f"{x}-{y+1}")
+        path = network.choose_path("0-0", f"{width-1}-{height-1}")
+        self.assertEqual(len(path), width + height - 1)
+        self.assertEqual(path[0], "0-0")
+        self.assertEqual(path[-1], f"{width-1}-{height-1}")
 
     def test_unsigned_detour_is_rejected(self):
         network, source, destination = self.make_network()

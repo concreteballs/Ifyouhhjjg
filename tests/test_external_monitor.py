@@ -1,4 +1,5 @@
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +42,22 @@ class ExternalMonitorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 collector.accept(self.report(data={"payload": "private"}))
             self.assertEqual(collector.status()["rejected"], 2)
+
+    def test_rejects_extra_fields_nonfinite_values_and_deep_nesting(self):
+        with tempfile.TemporaryDirectory() as folder:
+            collector = ReportCollector(Path(folder) / "reports.jsonl")
+            extra = self.report()
+            extra["command"] = "run"
+            with self.assertRaises(ValueError):
+                collector.accept(extra)
+            with self.assertRaises(ValueError):
+                collector.accept(self.report(data={"metric": math.nan}))
+            nested = {"x": "leaf"}
+            for _ in range(10):
+                nested = {"x": nested}
+            with self.assertRaises(ValueError):
+                collector.accept(self.report(data=nested))
+            self.assertEqual(collector.status()["rejected"], 3)
 
     def test_rejects_wrong_schema_or_agent(self):
         with tempfile.TemporaryDirectory() as folder:

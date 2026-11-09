@@ -33,7 +33,7 @@ This document distinguishes implemented controls from work still required. A pas
 ### Storage and operations
 - [x] Apply restrictive owner-only permissions to the main file-backed SQLite database on POSIX systems; WAL/journal/backup handling still needs separate review.
 - [ ] Define backup and recovery behaviour; evaluate encryption-at-rest requirements and key custody.
-- [ ] Add bounded log rotation/retention for JSONL reports and external spool files.
+- [x] Add bounded JSONL rotation for internal and external diagnostic archives, plus a hard-capped external spool with an explicit dropped-report counter.
 - [ ] Add stress tests for slow/unavailable collectors, disk-full conditions, concurrent writes, and restart recovery.
 - [ ] Review SQLite transaction and thread-safety assumptions before multi-threaded deployment.
 

@@ -40,6 +40,7 @@ class ExternalMonitorTests(unittest.TestCase):
                 collector.accept(self.report(event="execute_command"))
             with self.assertRaises(ValueError):
                 collector.accept(self.report(data={"payload": "private"}))
+            self.assertEqual(collector.status()["rejected"], 2)
 
     def test_rejects_wrong_schema_or_agent(self):
         with tempfile.TemporaryDirectory() as folder:

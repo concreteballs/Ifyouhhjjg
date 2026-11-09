@@ -7,7 +7,6 @@ from .monitor import DiagnosticMonitor
 from .network import SpectralNetwork
 from .packet import Packet, PacketType
 from .control import ControlPlane
-import time
 
 
 class SpectralRuntime:

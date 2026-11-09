@@ -2,7 +2,7 @@
 
 This document distinguishes implemented controls from work still required. A passing test suite is not a security certification.
 
-## Implemented baseline (regression tests added; CI verification pending)
+## Implemented baseline (PR CI passed; independent security review pending)
 
 - [x] External diagnostic receiver binds to loopback only.
 - [x] Bearer token is loaded from an owner-only file and must be at least 32 characters.
@@ -13,18 +13,18 @@ This document distinguishes implemented controls from work still required. A pas
 - [x] Raw exception text is not written to diagnostic reports.
 - [x] Detour control messages use HMAC, expiry, path validation, and in-process one-use nonces.
 - [x] Route selection uses deterministic shortest-hop, then load-aware, tie-broken routing.
-- [x] CI uses read-only repository permissions and pinned GitHub-maintained actions.
+- [x] CI uses read-only repository permissions and pinned GitHub-maintained actions.\n- [x] GitHub Actions unit-test job passed for PR #3 head `0f6d433` (run `42693512667`); independent review remains pending.
 
 ## Remaining work — do not treat as production-ready
 
 ### Packet security
-- [ ] Define a versioned packet envelope and threat model.
+- [x] Define the versioned HMAC-SHA256 signing envelope v1 for packet metadata and payload integrity.\n- [ ] Define the full serialized wire-packet format and complete threat model.
 - [x] Add opt-in end-to-end sender authentication and payload integrity using standard HMAC-SHA256 (application-injected source-key mapping; key lifecycle remains open).
 - [x] Add versioned owner-only key-file provisioning, rotation and revocation; bind source endpoint IDs to configured keys.
 - [ ] Add coordinated dual-key rotation/recovery and stronger endpoint identity provisioning; key files remain unencrypted at rest and must be distributed out of band.
 - [x] Add persistent duplicate/replay protection with bounded retention and atomic acceptance (packet-ID receipts; 24-hour default).
 - [ ] Ensure retries and legitimate retransmissions have explicit, testable semantics.
-- [ ] Keep privileged detour/control authorization separate from ordinary packet authentication.
+- [x] Keep privileged detour/control authorization separate from ordinary packet authentication; detour packets require both packet integrity verification and a separate control-plane authorization.
 
 ### Routing correction
 - [x] Implement authenticated, expiring HMAC correction messages to the previous router.

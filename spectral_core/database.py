@@ -10,8 +10,11 @@ from .address import SpectralAddress
 
 
 class SpectralDatabase:
-    def __init__(self, path: Union[str, Path] = ":memory:"):
+    def __init__(self, path: Union[str, Path] = ":memory:", journal_mode: str = "DELETE"):
         self.path = str(path)
+        journal_mode = str(journal_mode).upper()
+        if journal_mode not in {"DELETE", "WAL"}:
+            raise ValueError("journal_mode must be DELETE or WAL")
         if self.path != ":memory:":
             database_path = Path(path).expanduser()
             flags = os.O_RDWR | os.O_CREAT
@@ -26,6 +29,8 @@ class SpectralDatabase:
                 os.close(fd)
             self.path = str(database_path)
         self.connection = sqlite3.connect(self.path)
+        self.connection.execute(f"PRAGMA journal_mode = {journal_mode}")
+        self._secure_sqlite_files()
         self.connection.execute("""
             CREATE TABLE IF NOT EXISTS endpoint_data (
                 spectral_id TEXT PRIMARY KEY,
@@ -66,8 +71,20 @@ class SpectralDatabase:
             "CREATE INDEX IF NOT EXISTS applied_route_corrections_expiry ON applied_route_corrections(expires_at)"
         )
         self.connection.commit()
-        if self.path != ":memory:" and hasattr(os, "chmod"):
-            os.chmod(self.path, 0o600)
+        self._secure_sqlite_files()
+
+    def _secure_sqlite_files(self):
+        """Keep the database and SQLite sidecar files owner-only on POSIX."""
+        if self.path == ":memory:" or os.name != "posix":
+            return
+        for candidate in (self.path, self.path + "-journal", self.path + "-wal", self.path + "-shm"):
+            try:
+                info = os.lstat(candidate)
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("SQLite database and sidecars must be regular files")
+            os.chmod(candidate, 0o600, follow_symlinks=False)
 
     def put(self, address: SpectralAddress, payload: bytes):
         if not isinstance(payload, bytes):
@@ -78,6 +95,7 @@ class SpectralDatabase:
                 payload = excluded.payload, updated_at = CURRENT_TIMESTAMP
         """, (address.value, sqlite3.Binary(payload)))
         self.connection.commit()
+        self._secure_sqlite_files()
 
     def get(self, address: SpectralAddress) -> Optional[bytes]:
         row = self.connection.execute(
@@ -91,6 +109,7 @@ class SpectralDatabase:
             "DELETE FROM endpoint_data WHERE spectral_id = ?", (address.value,)
         )
         self.connection.commit()
+        self._secure_sqlite_files()
         return cursor.rowcount > 0
 
     def claim_packet(self, packet_id: str, source_id: str,
@@ -121,6 +140,7 @@ class SpectralDatabase:
             )
             accepted = cursor.rowcount == 1
             self.connection.commit()
+            self._secure_sqlite_files()
             return accepted
         except Exception:
             self.connection.rollback()
@@ -149,6 +169,7 @@ class SpectralDatabase:
             )
             accepted = cursor.rowcount == 1
             self.connection.commit()
+            self._secure_sqlite_files()
             return accepted
         except Exception:
             self.connection.rollback()
@@ -192,6 +213,7 @@ class SpectralDatabase:
                 (previous_router, destination_id, rejected_next_hop, corrected_next_hop, expires_at),
             )
             self.connection.commit()
+            self._secure_sqlite_files()
             return True
         except Exception:
             self.connection.rollback()
@@ -215,6 +237,7 @@ class SpectralDatabase:
                 (current,),
             ).fetchall()
             self.connection.commit()
+            self._secure_sqlite_files()
             return rows
         except Exception:
             self.connection.rollback()
@@ -242,6 +265,65 @@ class SpectralDatabase:
                 destination.commit()
             finally:
                 destination.close()
+            os.chmod(temporary, 0o600)
+            with temporary.open("rb") as handle:
+                os.fsync(handle.fileno())
+            os.replace(temporary, target)
+            os.chmod(target, 0o600)
+            if hasattr(os, "O_DIRECTORY"):
+                directory_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            return target
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @classmethod
+    def restore_from(cls, backup_path: Union[str, Path],
+                     target_path: Union[str, Path]) -> Path:
+        """Restore a verified SQLite backup atomically to a separate database path.
+
+        The target database must be closed/not in use. The backup is never modified.
+        """
+        source = Path(backup_path).expanduser()
+        target = Path(target_path).expanduser()
+        if source.is_symlink() or not source.is_file():
+            raise ValueError("Backup source must be a regular non-symlink file")
+        if source.resolve() == target.resolve():
+            raise ValueError("Restore target must differ from backup source")
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if target.is_symlink():
+            raise ValueError("Restore target must not be a symbolic link")
+        if target.exists() or any(Path(str(target) + suffix).exists()
+                                  for suffix in ("-journal", "-wal", "-shm")):
+            raise ValueError("Restore target and SQLite sidecars must not already exist")
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=target.name + ".", suffix=".restore.tmp", dir=str(target.parent)
+        )
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        os.close(fd)
+        temporary = Path(temporary_name)
+        try:
+            source_uri = source.resolve().as_uri() + "?mode=ro"
+            origin = sqlite3.connect(source_uri, uri=True)
+            try:
+                check = origin.execute("PRAGMA integrity_check").fetchone()
+                if check is None or check[0] != "ok":
+                    raise ValueError("Backup failed SQLite integrity_check")
+                destination = sqlite3.connect(str(temporary))
+                try:
+                    origin.backup(destination)
+                    destination.commit()
+                    restored_check = destination.execute("PRAGMA integrity_check").fetchone()
+                    if restored_check is None or restored_check[0] != "ok":
+                        raise ValueError("Restored database failed SQLite integrity_check")
+                finally:
+                    destination.close()
+            finally:
+                origin.close()
             os.chmod(temporary, 0o600)
             with temporary.open("rb") as handle:
                 os.fsync(handle.fileno())

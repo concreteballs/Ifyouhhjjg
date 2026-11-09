@@ -53,6 +53,38 @@ class PersistentReplayProtectionTests(unittest.TestCase):
             database.close()
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_atomic_backup_preserves_data_and_replay_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "live.sqlite3"
+            backup_path = Path(directory) / "backups" / "snapshot.sqlite3"
+            source = SpectralDatabase(source_path)
+            address = SpectralAddress("123")
+            source.put(address, b"saved-value")
+            self.assertTrue(source.claim_packet("saved-packet", "123"))
+            self.assertEqual(source.backup_to(backup_path), backup_path)
+            source.close()
+
+            restored = SpectralDatabase(backup_path)
+            self.assertEqual(restored.get(address), b"saved-value")
+            self.assertFalse(restored.claim_packet("saved-packet", "123"))
+            restored.close()
+
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(backup_path.stat().st_mode), 0o600)
+
+    def test_backup_rejects_live_database_path_and_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live_path = Path(directory) / "live.sqlite3"
+            database = SpectralDatabase(live_path)
+            with self.assertRaises(ValueError):
+                database.backup_to(live_path)
+            if hasattr(os, "symlink"):
+                link_path = Path(directory) / "backup-link.sqlite3"
+                link_path.symlink_to(Path(directory) / "target.sqlite3")
+                with self.assertRaises(ValueError):
+                    database.backup_to(link_path)
+            database.close()
+
     def test_runtime_rejects_duplicate_packet_id(self):
         with tempfile.TemporaryDirectory() as directory:
             database = SpectralDatabase(Path(directory) / "core.sqlite3")

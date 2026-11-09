@@ -33,16 +33,32 @@ class RoutingCorrection:
     expires_at: float
 
 class SpectralNetwork:
-    def __init__(self, monitor=None, correction_ttl_seconds=30.0):
+    def __init__(self, monitor=None, correction_ttl_seconds=30.0, database=None):
         self.routers: Dict[str, Router] = {}
         self.endpoints: Dict[SpectralAddress, str] = {}
         self.monitor = monitor
+        self.database = database
         if not math.isfinite(correction_ttl_seconds) or correction_ttl_seconds <= 0:
             raise ValueError("correction_ttl_seconds must be finite and positive")
         self.correction_ttl_seconds = correction_ttl_seconds
         self._corrections = {}
         self._authenticated_corrections = {}
         self._route_hints = {}
+        self._restore_persisted_corrections()
+
+    def set_database(self, database):
+        """Attach durable state and restore still-active route corrections."""
+        self.database = database
+        self._restore_persisted_corrections()
+
+    def _restore_persisted_corrections(self):
+        if self.database is None:
+            return
+        self._authenticated_corrections.clear()
+        for previous, destination, rejected, corrected, expires_at in self.database.load_route_corrections():
+            self._authenticated_corrections[(previous, destination)] = RoutingCorrection(
+                previous, destination, rejected, corrected, float(expires_at)
+            )
 
     def _event(self, event, **data):
         if self.monitor is not None:
@@ -237,8 +253,21 @@ class SpectralNetwork:
         existing = self._authenticated_corrections.get(correction_key)
         if existing and existing.expires_at > time.time() and existing.corrected_next_hop != message.corrected_next_hop:
             return False
-        if not authority.verify_and_consume(message, packet_id=message.packet_id):
+        if not authority.verify_and_consume(
+            message, packet_id=message.packet_id, database=self.database
+        ):
             return False
+        if self.database is not None:
+            try:
+                stored = self.database.put_route_correction(
+                    message.previous_router, destination.value,
+                    message.reporting_router, message.corrected_next_hop,
+                    message.expires_at,
+                )
+            except (OSError, RuntimeError, ValueError):
+                return False
+            if not stored:
+                return False
         self._authenticated_corrections[correction_key] = RoutingCorrection(
             message.previous_router, destination.value, message.reporting_router,
             message.corrected_next_hop, float(message.expires_at),

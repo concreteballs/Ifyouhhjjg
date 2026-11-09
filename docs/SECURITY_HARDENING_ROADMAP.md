@@ -13,12 +13,14 @@ This document distinguishes implemented controls from work still required. A pas
 - [x] Raw exception text is not written to diagnostic reports.
 - [x] Detour control messages use HMAC, expiry, path validation, and in-process one-use nonces.
 - [x] Route selection uses deterministic shortest-hop, then load-aware, tie-broken routing.
-- [x] CI uses read-only repository permissions and pinned GitHub-maintained actions.\n- [x] GitHub Actions unit-test job passed for PR #3 head `0f6d433` (run `42693512667`); independent review remains pending.
+- [x] CI uses read-only repository permissions and pinned GitHub-maintained actions.
+- [x] GitHub Actions unit-test job passed for PR #3 head `0f6d433` (run `42693512667`); independent review remains pending.
 
 ## Remaining work — do not treat as production-ready
 
 ### Packet security
-- [x] Define the versioned HMAC-SHA256 signing envelope v1 for packet metadata and payload integrity.\n- [ ] Define the full serialized wire-packet format and complete threat model.
+- [x] Define the versioned HMAC-SHA256 signing envelope v1 for packet metadata and payload integrity.
+- [ ] Define the full serialized wire-packet format and complete threat model.
 - [x] Add opt-in end-to-end sender authentication and payload integrity using standard HMAC-SHA256 (application-injected source-key mapping; key lifecycle remains open).
 - [x] Add versioned owner-only key-file provisioning, rotation and revocation; bind source endpoint IDs to configured keys.
 - [ ] Add coordinated dual-key rotation/recovery and stronger endpoint identity provisioning; key files remain unencrypted at rest and must be distributed out of band.

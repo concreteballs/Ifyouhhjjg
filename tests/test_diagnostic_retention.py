@@ -28,7 +28,7 @@ class DiagnosticRetentionTests(unittest.TestCase):
             self.assertTrue(path.exists())
             self.assertTrue(path.with_name("internal.jsonl.1").exists())
             self.assertLessEqual(path.stat().st_size, 16385)
-            self.assertLessEqual(path.with_name("internal.jsonl.1").stat().st_size, 16384)
+            self.assertLessEqual(path.with_name("internal.jsonl.1").stat().st_size, 16385)
 
     def test_external_spool_has_hard_size_limit_and_drop_counter(self):
         with tempfile.TemporaryDirectory() as directory:

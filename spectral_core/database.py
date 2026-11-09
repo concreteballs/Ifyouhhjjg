@@ -115,7 +115,8 @@ class SpectralDatabase:
         fd, temporary_name = tempfile.mkstemp(
             prefix=target.name + ".", suffix=".tmp", dir=str(target.parent)
         )
-        os.fchmod(fd, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
         os.close(fd)
         temporary = Path(temporary_name)
         try:

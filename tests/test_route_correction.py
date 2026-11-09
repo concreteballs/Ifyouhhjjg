@@ -53,8 +53,11 @@ class AuthenticatedRouteCorrectionTests(unittest.TestCase):
             self.authority, "packet-45", self.destination, "r0", "r1"
         )
         self.assertTrue(self.network.apply_route_correction(message, self.authority))
+        self.network.set_load("r1", 0)
+        self.network.set_load("r2", 10)
+        self.assertEqual(self.network.choose_next_hop("r0", "r3", self.destination), "r2")
         other_destination = SpectralAddress("111")
-        self.assertEqual(self.network.choose_next_hop("r0", "r3", other_destination), "r2")
+        self.assertEqual(self.network.choose_next_hop("r0", "r3", other_destination), "r1")
 
 
 if __name__ == "__main__":

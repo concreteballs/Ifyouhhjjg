@@ -7,13 +7,18 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Exact spectral endpoint identifiers using ten neutral symbols (0–9).
 - Tail-first address view, preserving the addressing convention for future routing logic.
 - Router graph with endpoint ownership and deterministic shortest-path forwarding.
-- Load-aware tie-breaking between equally short next hops.
+- Tail-first responsibility prefixes with longest-prefix ownership resolution.
+- Load-aware selection across equal-length paths.
+- Local route-hint validation and expiring correction records.
+- Neighbour-assisted rerouting around unavailable routers.
+- HMAC-authenticated, expiring, one-use detour authorizations.
 - Packet source/destination identity and hop-limit protection.
 - SQLite endpoint data storage.
 - Embedded diagnostic monitor connected to the live runtime.
 - Structured JSONL reports, health checks, error events and atomic status snapshots.
 - Diagnostic event allowlist and rejection of payload/secret fields.
 - Explicit rejection of unauthenticated detour/control packet types.
+- Optional standalone external diagnostic collector with allowlisted report ingestion, durable acknowledgements and a loopback-only HTTP bridge.
 
 ## Internal diagnostic monitor
 
@@ -21,7 +26,7 @@ The monitor starts automatically with `SpectralRuntime`.
 
 It records router creation, link changes, endpoint registration, route starts, individual hops, packet delivery, database reads/writes and rejected packets. Runtime errors are recorded with operation and exception metadata.
 
-The monitor never records packet payloads. It rejects unknown event types and sensitive field names. Reports use schema `spectral-core.diagnostic.v1`.
+The monitor never records packet payloads. It rejects unknown event types and sensitive field names. Reports use schema `spectral-core.diagnostic.v1`. External forwarding is disabled by default. When enabled, reports are sent only to HTTPS or loopback HTTP with a bearer token; failed deliveries are spooled locally and can be retried with `runtime.monitor.flush_external_spool()`.
 
 By default, persistent reports are written locally to:
 
@@ -46,6 +51,27 @@ health_report = runtime.run_diagnostics()
 ```
 
 Reports remain local. There is no automatic upload to GitHub or another network service.
+
+
+## External diagnostic monitor
+
+The external collector runs independently from the core process and accepts only allowlisted diagnostic reports. It never interprets reports as commands, rejects sensitive fields, deduplicates report IDs and acknowledges only after durable JSONL persistence. The optional HTTP receiver binds to loopback by default:
+
+```bash
+python -m spectral_monitor.server --token "replace-with-a-long-random-token" --path external-diagnostics.jsonl
+```
+
+To enable forwarding from the internal monitor, construct it with an HTTPS endpoint (or the loopback receiver URL) and a bearer token:
+
+```python
+monitor = DiagnosticMonitor(
+    "~/.spectral-core/diagnostics.jsonl",
+    external_endpoint="http://127.0.0.1:8765/v1/reports",
+    external_token="your-local-token",
+)
+```
+
+The receiver exposes read-only health at `GET /health` and report ingestion at `POST /v1/reports`. It has no command, file-path or arbitrary action endpoint.
 
 ## Run tests
 
@@ -85,10 +111,8 @@ The current router is a working graph-routing baseline. It does not yet implemen
 
 ## Next milestones
 
-1. Responsibility-region decisions and correction messages.
-2. Authenticated detour/control policy and central load balancing.
-3. Local health monitoring and neighbour assistance.
-4. Persistent endpoint registry and database-backed queries.
-5. A separate 2D interaction/adder experiment using shared core interfaces.
+1. Persistent endpoint registry and database-backed queries.
+2. More extensive simulation of large spectral fields and router clusters.
+3. A separate 2D interaction/adder experiment using shared core interfaces.
 
 Do not commit real credentials, private keys, production security mappings or personal data to this public repository.

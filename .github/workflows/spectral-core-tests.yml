@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "spectral_core/**"
+      - "spectral_monitor/**"
       - "tests/**"
       - ".github/workflows/spectral-core-tests.yml"
   pull_request:

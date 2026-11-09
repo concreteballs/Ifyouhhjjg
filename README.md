@@ -13,7 +13,8 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Neighbour-assisted rerouting around unavailable routers.
 - HMAC-authenticated, expiring, one-use detour authorizations.
 - Packet source/destination identity and hop-limit protection.
-- SQLite endpoint data storage with owner-only file permissions on POSIX systems.\n- Persistent, atomic packet-ID replay receipts with a 24-hour default retention window.
+- SQLite endpoint data storage with owner-only file permissions on POSIX systems.
+- Persistent, atomic packet-ID replay receipts with a 24-hour default retention window.
 - Embedded diagnostic monitor connected to the live runtime.
 - Structured JSONL reports, health checks, error events and atomic status snapshots.
 - Diagnostic event allowlist and rejection of payload/secret fields.

@@ -19,7 +19,7 @@ This document distinguishes implemented controls from work still required. A pas
 
 ### Packet security
 - [ ] Define a versioned packet envelope and threat model.
-- [ ] Add end-to-end sender authentication and payload integrity using standard cryptographic primitives.
+- [x] Add opt-in end-to-end sender authentication and payload integrity using standard HMAC-SHA256 (application-injected source-key mapping; key lifecycle remains open).
 - [ ] Define key provisioning, identity binding, rotation, revocation, and recovery.
 - [x] Add persistent duplicate/replay protection with bounded retention and atomic acceptance (packet-ID receipts; 24-hour default).
 - [ ] Ensure retries and legitimate retransmissions have explicit, testable semantics.

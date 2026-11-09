@@ -9,7 +9,7 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Router graph with endpoint ownership and deterministic shortest-path forwarding.
 - Tail-first responsibility prefixes with longest-prefix ownership resolution.
 - Load-aware selection across equal-length paths.
-- Local route-hint validation and expiring correction records.
+- Local route-hint validation plus authenticated, expiring previous-hop route corrections.
 - Neighbour-assisted rerouting around unavailable routers.
 - HMAC-authenticated, expiring, one-use detour authorizations.
 - Packet source/destination identity and hop-limit protection.
@@ -118,7 +118,7 @@ print(runtime.diagnostics())
 
 The software interfaces are kept separate from the physical implementation. The first emulator uses ordinary Python objects and SQLite. A future photonic backend may replace selected cell or interaction operations without requiring application data to encode physical wavelength values.
 
-The current router is a working graph-routing baseline. It does not yet implement the complete responsibility-map correction protocol, authenticated central detours, neighbour assistance, or the future photonic interaction model.
+The current router implements graph routing, neighbour-assisted rerouting and authenticated previous-hop correction messages. Durable distributed correction state, central policy distribution and the future photonic interaction model remain future work.
 
 ## Next milestones
 

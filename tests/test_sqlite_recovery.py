@@ -15,7 +15,7 @@ class SQLiteRecoveryAndPermissionsTests(unittest.TestCase):
             live_path = root / "live.sqlite3"
             backup_path = root / "backup.sqlite3"
             restored_path = root / "restored.sqlite3"
-            database = SpectralDatabase(live_path)
+            database = SpectralDatabase(live_path, journal_mode="WAL")
             address = SpectralAddress("123")
             database.put(address, b"endpoint-payload")
             self.assertTrue(database.claim_packet("packet-1", "source-1", now=100))

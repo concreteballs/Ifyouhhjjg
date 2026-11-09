@@ -27,6 +27,21 @@ class DiagnosticMonitorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             monitor.emit("packet_delivered", payload="do not log this")
 
+    def test_exception_text_is_not_written_to_diagnostics(self):
+        monitor = DiagnosticMonitor()
+        try:
+            raise RuntimeError("database password=do-not-log")
+        except RuntimeError as error:
+            monitor.record_exception("test", error)
+        report = monitor.events()[-1]
+        self.assertNotIn("error_message", report["data"])
+        self.assertNotIn("do-not-log", monitor.export_jsonl())
+
+    def test_monitor_rejects_non_finite_metrics(self):
+        monitor = DiagnosticMonitor()
+        with self.assertRaises(ValueError):
+            monitor.emit("router_load", load=float("nan"))
+
     def test_self_check_detects_broken_topology(self):
         monitor = DiagnosticMonitor()
         network = SpectralNetwork()

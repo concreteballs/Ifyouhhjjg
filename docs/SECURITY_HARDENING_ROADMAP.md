@@ -21,7 +21,7 @@ This document distinguishes implemented controls from work still required. A pas
 - [ ] Define a versioned packet envelope and threat model.
 - [ ] Add end-to-end sender authentication and payload integrity using standard cryptographic primitives.
 - [ ] Define key provisioning, identity binding, rotation, revocation, and recovery.
-- [ ] Add persistent duplicate/replay protection with bounded retention and atomic acceptance.
+- [x] Add persistent duplicate/replay protection with bounded retention and atomic acceptance (packet-ID receipts; 24-hour default).
 - [ ] Ensure retries and legitimate retransmissions have explicit, testable semantics.
 - [ ] Keep privileged detour/control authorization separate from ordinary packet authentication.
 

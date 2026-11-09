@@ -73,7 +73,7 @@ class ReportCollector:
             if report_id in self._seen:
                 return {"ok": True, "duplicate": True, "report_id": report_id}
             with self.report_path.open("a", encoding="utf-8") as stream:
-                stream.write(encoded + "\\n")
+                stream.write(encoded + "\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             self._seen.add(report_id)

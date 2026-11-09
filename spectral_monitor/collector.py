@@ -51,6 +51,14 @@ class ReportCollector:
         raise ValueError("Unsupported or oversized diagnostic value")
 
     def accept(self, report_json):
+        try:
+            return self._accept(report_json)
+        except Exception:
+            with self._lock:
+                self._rejected += 1
+            raise
+
+    def _accept(self, report_json):
         report = json.loads(report_json) if isinstance(report_json, str) else report_json
         if not isinstance(report, dict) or report.get("schema") != SCHEMA:
             raise ValueError("Unsupported diagnostic schema")

@@ -17,7 +17,7 @@ class PersistentReplayProtectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "core.sqlite3"
             database = SpectralDatabase(path)
-            self.assertTrue(database.claim_packet("packet-1", "123", now=100))
+            self.assertTrue(database.claim_packet("packet-1", "123", retention_seconds=5, now=100))
             self.assertFalse(database.claim_packet("packet-1", "123", now=101))
             database.close()
 

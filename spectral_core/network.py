@@ -21,14 +21,23 @@ class Router:
 
 class SpectralNetwork:
     """Graph of routers with endpoint ownership and local next-hop choice."""
-    def __init__(self):
+    def __init__(self, monitor=None):
         self.routers: Dict[str, Router] = {}
         self.endpoints: Dict[SpectralAddress, str] = {}
+        self.monitor = monitor
+
+    def set_monitor(self, monitor):
+        self.monitor = monitor
+
+    def _event(self, event, **data):
+        if self.monitor is not None:
+            self.monitor.emit(event, **data)
 
     def add_router(self, router: Router):
         if router.router_id in self.routers:
             raise ValueError(f"Duplicate router: {router.router_id}")
         self.routers[router.router_id] = router
+        self._event("router_added", router_id=router.router_id, position=list(router.position))
 
     def connect(self, first: str, second: str):
         if first not in self.routers or second not in self.routers:
@@ -39,6 +48,7 @@ class SpectralNetwork:
             self.routers[first].neighbours.append(second)
         if first not in self.routers[second].neighbours:
             self.routers[second].neighbours.append(first)
+        self._event("link_connected", first=first, second=second)
 
     def register_endpoint(self, address: SpectralAddress, router_id: str):
         if router_id not in self.routers:
@@ -47,6 +57,7 @@ class SpectralNetwork:
             raise ValueError(f"Endpoint already registered: {address}")
         self.endpoints[address] = router_id
         self.routers[router_id].responsibility.append(address)
+        self._event("endpoint_registered", spectral_id=address.value, router_id=router_id)
 
     def owner_of(self, address: SpectralAddress):
         try:

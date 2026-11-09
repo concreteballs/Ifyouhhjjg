@@ -89,7 +89,7 @@ class SpectralNetwork:
         tail = address.tail_first
         matches = [(len(p), r.router_id) for r in self.routers.values() if r.available
                    for p in r.responsibility_prefixes if tail.startswith(p)]
-        return max(matches, default=(0, self.owner_of(address)))[1]
+        if matches:\n            return max(matches, key=lambda item: (item[0], item[1]))[1]\n        return self.owner_of(address)
 
     def owner_of(self, address):
         try: owner = self.endpoints[address]
@@ -151,7 +151,7 @@ class SpectralNetwork:
         paths = self.shortest_paths(source, destination, excluded)
         return min(paths, key=lambda p: (sum(self.routers[x].load for x in p[1:-1]), tuple(p)))
 
-    def choose_next_hop(self, current, destination, address=None):
+    def choose_next_hop(self, current, destination, address=None, previous_router=None):
         expected = self.choose_path(current, destination)[1] if current != destination else current
         if address is None: return expected
         key = (current, address.value, expected)

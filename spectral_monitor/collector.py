@@ -4,6 +4,7 @@ import math
 import os
 import re
 import threading
+from collections import deque
 from pathlib import Path
 
 SCHEMA = "spectral-core.diagnostic.v1"
@@ -20,6 +21,7 @@ FORBIDDEN_KEYS = {"payload", "content", "token", "secret", "password",
 REPORT_KEYS = {"schema", "agent", "event", "level", "timestamp_ms", "report_id", "data"}
 MAX_REPORT_BYTES = 16384
 MAX_DEPTH = 8
+MAX_DEDUP_IDS = 50000
 
 
 class ReportCollector:
@@ -28,6 +30,7 @@ class ReportCollector:
         self.report_path = Path(report_path).expanduser()
         self._lock = threading.RLock()
         self._seen = set()
+        self._seen_order = deque()
         self._accepted = 0
         self._rejected = 0
         self.report_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -38,10 +41,19 @@ class ReportCollector:
                         row = json.loads(line)
                         report_id = row.get("report_id")
                         if isinstance(report_id, str):
-                            self._seen.add(report_id)
+                            self._remember(report_id)
                             self._accepted += 1
                     except (ValueError, AttributeError, TypeError):
                         continue
+
+    def _remember(self, report_id):
+        if report_id in self._seen:
+            return
+        if len(self._seen_order) >= MAX_DEDUP_IDS:
+            expired = self._seen_order.popleft()
+            self._seen.discard(expired)
+        self._seen_order.append(report_id)
+        self._seen.add(report_id)
 
     @classmethod
     def _validate(cls, value, key="", depth=0):
@@ -118,7 +130,7 @@ class ReportCollector:
                     os.fsync(fd)
             finally:
                 os.close(fd)
-            self._seen.add(report_id)
+            self._remember(report_id)
             self._accepted += 1
         return {"ok": True, "duplicate": False, "report_id": report_id}
 

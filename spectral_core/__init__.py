@@ -5,9 +5,11 @@ from .database import SpectralDatabase
 from .monitor import DiagnosticMonitor
 from .network import SpectralNetwork, Router
 from .packet import Packet, PacketType
+from .packet_auth import PacketAuthenticator
 from .runtime import SpectralRuntime
+from .route_correction import RouteCorrectionAuthority, RouteCorrectionMessage
 
 __all__ = [
-    "ControlPlane", "DetourAuthorization", "DiagnosticMonitor", "Packet", "PacketType", "Router", "SpectralAddress",
-    "SpectralDatabase", "SpectralNetwork", "SpectralRuntime",
+    "ControlPlane", "DetourAuthorization", "DiagnosticMonitor", "Packet", "PacketAuthenticator", "PacketType", "Router", "SpectralAddress",
+    "SpectralDatabase", "SpectralNetwork", "SpectralRuntime", "RouteCorrectionAuthority", "RouteCorrectionMessage",
 ]

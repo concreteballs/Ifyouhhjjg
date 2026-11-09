@@ -9,13 +9,16 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Router graph with endpoint ownership and deterministic shortest-path forwarding.
 - Tail-first responsibility prefixes with longest-prefix ownership resolution.
 - Load-aware selection across equal-length paths.
-- Local route-hint validation and expiring correction records.
+- Local route-hint validation plus authenticated, expiring previous-hop route corrections.
 - Neighbour-assisted rerouting around unavailable routers.
 - HMAC-authenticated, expiring, one-use detour authorizations.
 - Packet source/destination identity and hop-limit protection.
-- SQLite endpoint data storage.
+- Optional HMAC-SHA256 packet origin and payload-integrity checks with owner-only versioned key-file provisioning.
+- SQLite endpoint data storage with owner-only file permissions on POSIX systems.
+- Persistent, atomic packet-ID replay receipts with a 24-hour default retention window.
+- Atomic SQLite backup API that preserves endpoint data and replay receipts.
 - Embedded diagnostic monitor connected to the live runtime.
-- Structured JSONL reports, health checks, error events and atomic status snapshots.
+- Structured JSONL reports with bounded rotation, capped external forwarding spool, health checks, error events and atomic status snapshots.
 - Diagnostic event allowlist and rejection of payload/secret fields.
 - Explicit rejection of unauthenticated detour/control packet types.
 - Optional standalone external diagnostic collector with allowlisted report ingestion, durable acknowledgements and a loopback-only HTTP bridge.
@@ -78,7 +81,11 @@ monitor = DiagnosticMonitor(
 
 The receiver binds only to `127.0.0.1`; it cannot be configured to listen publicly. Its token must be stored in an owner-only file with at least 32 characters. The receiver exposes read-only health at `GET /health` and report ingestion at `POST /v1/reports`. It has no command, file-path or arbitrary action endpoint. For remote forwarding, place a separately managed HTTPS reverse proxy in front of the loopback service; do not expose the built-in HTTP server directly.
 
-## Security and provenance\n\nSee [SECURITY.md](SECURITY.md) for the current security boundary and known limitations, and [PROVENANCE.md](PROVENANCE.md) for the runtime/CI dependency and licensing record. The repository currently has no public reuse license.\n\n## Run tests
+## Security and provenance
+
+See [SECURITY.md](SECURITY.md) for the current security boundary and known limitations, and [PROVENANCE.md](PROVENANCE.md) for the runtime/CI dependency and licensing record. The repository uses a custom source-available personal-use license draft; see [LICENSE](LICENSE) and [docs/COMMERCIAL_MODEL.md](docs/COMMERCIAL_MODEL.md). It is not an OSI-approved open-source license and must receive legal review before release.
+
+## Run tests
 
 Python 3.10 or newer is recommended. No third-party packages are required.
 
@@ -112,7 +119,7 @@ print(runtime.diagnostics())
 
 The software interfaces are kept separate from the physical implementation. The first emulator uses ordinary Python objects and SQLite. A future photonic backend may replace selected cell or interaction operations without requiring application data to encode physical wavelength values.
 
-The current router is a working graph-routing baseline. It does not yet implement the complete responsibility-map correction protocol, authenticated central detours, neighbour assistance, or the future photonic interaction model.
+The current router implements graph routing, neighbour-assisted rerouting and authenticated previous-hop correction messages. Durable distributed correction state, central policy distribution and the future photonic interaction model remain future work.
 
 ## Next milestones
 

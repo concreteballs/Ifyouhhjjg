@@ -26,7 +26,13 @@ MAX_DEDUP_IDS = 50000
 
 class ReportCollector:
     """Allowlisted JSONL receiver with bounded input and durable acknowledgements."""
-    def __init__(self, report_path):
+    def __init__(self, report_path, max_file_bytes=5 * 1024 * 1024, backups=3):
+        if isinstance(max_file_bytes, bool) or not isinstance(max_file_bytes, int) or max_file_bytes < MAX_REPORT_BYTES + 1:
+            raise ValueError("max_file_bytes must accommodate one maximum-size report")
+        if isinstance(backups, bool) or not isinstance(backups, int) or backups < 0 or backups > 20:
+            raise ValueError("backups must be between 0 and 20")
+        self.max_file_bytes = max_file_bytes
+        self.backups = backups
         self.report_path = Path(report_path).expanduser()
         self._lock = threading.RLock()
         self._seen = set()
@@ -34,8 +40,14 @@ class ReportCollector:
         self._accepted = 0
         self._rejected = 0
         self.report_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.report_path.exists():
-            with self.report_path.open(encoding="utf-8") as stream:
+        history = [
+            self.report_path.with_name(self.report_path.name + f".{index}")
+            for index in range(self.backups, 0, -1)
+        ] + [self.report_path]
+        for history_path in history:
+            if not history_path.is_file():
+                continue
+            with history_path.open(encoding="utf-8") as stream:
                 for line in stream:
                     try:
                         row = json.loads(line)
@@ -45,6 +57,18 @@ class ReportCollector:
                             self._accepted += 1
                     except (ValueError, AttributeError, TypeError):
                         continue
+
+    def _rotate_report(self):
+        if self.backups <= 0:
+            self.report_path.unlink(missing_ok=True)
+            return
+        for index in range(self.backups, 1, -1):
+            source = self.report_path.with_name(self.report_path.name + f".{index - 1}")
+            target = self.report_path.with_name(self.report_path.name + f".{index}")
+            if source.exists():
+                os.replace(source, target)
+        if self.report_path.exists():
+            os.replace(self.report_path, self.report_path.with_name(self.report_path.name + ".1"))
 
     def _remember(self, report_id):
         if report_id in self._seen:
@@ -121,11 +145,14 @@ class ReportCollector:
         with self._lock:
             if report_id in self._seen:
                 return {"ok": True, "duplicate": True, "report_id": report_id}
+            line = encoded + "\n"
+            if self.report_path.exists() and self.report_path.stat().st_size + len(line.encode("utf-8")) > self.max_file_bytes:
+                self._rotate_report()
             fd = os.open(self.report_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
                 os.fchmod(fd, 0o600)
                 with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as stream:
-                    stream.write(encoded + "\n")
+                    stream.write(line)
                     stream.flush()
                     os.fsync(fd)
             finally:

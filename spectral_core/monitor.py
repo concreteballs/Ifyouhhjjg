@@ -57,7 +57,21 @@ class DiagnosticMonitor:
 
     def __init__(self, report_path: Optional[str | Path] = None,
                  external_endpoint: Optional[str] = None,
-                 external_token: Optional[str] = None):
+                 external_token: Optional[str] = None,
+                 max_report_bytes: int = 5 * 1024 * 1024,
+                 report_backups: int = 3,
+                 max_spool_bytes: int = 10 * 1024 * 1024):
+        for name, value, minimum in (
+            ("max_report_bytes", max_report_bytes, 16385),
+            ("report_backups", report_backups, 0),
+            ("max_spool_bytes", max_spool_bytes, 16384),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ValueError(f"{name} is outside its allowed range")
+        self.max_report_bytes = max_report_bytes
+        self.report_backups = report_backups
+        self.max_spool_bytes = max_spool_bytes
+        self._spool_dropped = 0
         self.report_path = Path(report_path).expanduser() if report_path else None
         self.external_endpoint = external_endpoint
         self.external_token = external_token
@@ -111,6 +125,19 @@ class DiagnosticMonitor:
             raise TypeError("Diagnostic data must be an object")
         return {str(key): check(value, str(key)) for key, value in data.items()}
 
+    @staticmethod
+    def _rotate_jsonl(path: Path, backups: int) -> None:
+        if backups <= 0:
+            path.unlink(missing_ok=True)
+            return
+        for index in range(backups, 1, -1):
+            source = path.with_name(path.name + f".{index - 1}")
+            target = path.with_name(path.name + f".{index}")
+            if source.exists():
+                os.replace(source, target)
+        if path.exists():
+            os.replace(path, path.with_name(path.name + ".1"))
+
     def emit(self, event: str, level: str = "info", **data: Any) -> dict[str, Any]:
         if event not in ALLOWED_EVENTS:
             raise ValueError(f"Unknown diagnostic event: {event}")
@@ -136,11 +163,14 @@ class DiagnosticMonitor:
                 self._last_error = report
             if self.report_path:
                 self.report_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                line = encoded + "\n"
+                if self.report_path.exists() and self.report_path.stat().st_size + len(line.encode("utf-8")) > self.max_report_bytes:
+                    self._rotate_jsonl(self.report_path, self.report_backups)
                 fd = os.open(self.report_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
                 try:
                     os.fchmod(fd, 0o600)
                     with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
-                        handle.write(encoded + "\n")
+                        handle.write(line)
                         handle.flush()
                         os.fsync(fd)
                 finally:
@@ -175,11 +205,18 @@ class DiagnosticMonitor:
             return
         with self._lock:
             self.external_spool_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            line = json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n"
+            if self.external_spool_path.exists() and self.external_spool_path.stat().st_size + len(line.encode("utf-8")) > self.max_spool_bytes:
+                self._spool_dropped += 1
+                return
+            if len(line.encode("utf-8")) > self.max_spool_bytes:
+                self._spool_dropped += 1
+                return
             fd = os.open(self.external_spool_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
                 os.fchmod(fd, 0o600)
                 with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
-                    handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+                    handle.write(line)
                     handle.flush()
                     os.fsync(fd)
             finally:
@@ -286,6 +323,7 @@ class DiagnosticMonitor:
                 "last_event": self._events[-1] if self._events else None,
                 "last_error": self._last_error,
                 "report_path": str(self.report_path) if self.report_path else None,
+                "external_spool_dropped": self._spool_dropped,
             }
 
     def events(self, limit: Optional[int] = None) -> list[dict[str, Any]]:

@@ -5,6 +5,7 @@ import math
 import time
 from typing import Dict, List, Optional, Tuple
 from .address import SpectralAddress
+from .route_correction import RouteCorrectionAuthority, RouteCorrectionMessage
 
 Position = Tuple[int, int]
 
@@ -40,6 +41,7 @@ class SpectralNetwork:
             raise ValueError("correction_ttl_seconds must be finite and positive")
         self.correction_ttl_seconds = correction_ttl_seconds
         self._corrections = {}
+        self._authenticated_corrections = {}
         self._route_hints = {}
 
     def _event(self, event, **data):
@@ -176,7 +178,95 @@ class SpectralNetwork:
                     heapq.heappush(queue, (next_key, nxt))
         raise RuntimeError(f"No route from {source} to {destination}")
 
+    def issue_route_correction(self, authority: RouteCorrectionAuthority, packet_id: str,
+                               destination: SpectralAddress, previous_router: str,
+                               reporting_router: str, ttl_seconds: int = 30):
+        """Create a signed correction for the router that sent a packet here."""
+        if previous_router not in self.routers or reporting_router not in self.routers:
+            raise KeyError("Unknown router in route-correction request")
+        if reporting_router not in self.routers[previous_router].neighbours:
+            raise ValueError("Reporting router is not the previous router's neighbour")
+        destination_router = self.responsibility_owner(destination)
+        path = self.choose_path(previous_router, destination_router)
+        if len(path) < 2 or path[1] == reporting_router:
+            return None
+        return authority.issue(
+            packet_id=packet_id,
+            destination_id=destination.value,
+            previous_router=previous_router,
+            reporting_router=reporting_router,
+            rejected_next_hop=reporting_router,
+            corrected_next_hop=path[1],
+            ttl_seconds=ttl_seconds,
+        )
+
+    def apply_route_correction(self, message: RouteCorrectionMessage,
+                               authority: RouteCorrectionAuthority) -> bool:
+        """Validate topology and signature before caching a destination-scoped correction."""
+        if not isinstance(message, RouteCorrectionMessage) or not isinstance(authority, RouteCorrectionAuthority):
+            return False
+        try:
+            authority._validate_fields(
+                message.packet_id, message.destination_id, message.previous_router,
+                message.reporting_router, message.rejected_next_hop, message.corrected_next_hop,
+            )
+        except (TypeError, ValueError):
+            return False
+        previous = self.routers.get(message.previous_router)
+        reporting = self.routers.get(message.reporting_router)
+        corrected = self.routers.get(message.corrected_next_hop)
+        if previous is None or reporting is None or corrected is None:
+            return False
+        if message.rejected_next_hop != message.reporting_router:
+            return False
+        if message.reporting_router not in previous.neighbours:
+            return False
+        if message.corrected_next_hop not in previous.neighbours:
+            return False
+        if not previous.available or not reporting.available or not corrected.available:
+            return False
+        try:
+            destination = SpectralAddress(message.destination_id)
+            destination_router = self.responsibility_owner(destination)
+            corrected_path = self.choose_path(message.corrected_next_hop, destination_router)
+        except (KeyError, RuntimeError, ValueError):
+            return False
+        if message.previous_router in corrected_path:
+            return False
+        correction_key = (message.previous_router, destination.value)
+        existing = self._authenticated_corrections.get(correction_key)
+        if existing and existing.expires_at > time.time() and existing.corrected_next_hop != message.corrected_next_hop:
+            return False
+        if not authority.verify_and_consume(message, packet_id=message.packet_id):
+            return False
+        self._authenticated_corrections[correction_key] = RoutingCorrection(
+            message.previous_router, destination.value, message.reporting_router,
+            message.corrected_next_hop, float(message.expires_at),
+        )
+        self._event(
+            "route_correction", packet_id=message.packet_id,
+            destination_id=destination.value, previous_router=message.previous_router,
+            reporting_router=message.reporting_router,
+            rejected_next_hop=message.reporting_router,
+            corrected_next_hop=message.corrected_next_hop,
+            ttl_seconds=max(0, message.expires_at - int(time.time())),
+            authenticated=True,
+        )
+        return True
+
     def choose_next_hop(self, current, destination, address=None, previous_router=None):
+        if address is not None:
+            correction_key = (current, address.value)
+            correction = self._authenticated_corrections.get(correction_key)
+            if correction is not None:
+                if correction.expires_at > time.time() and correction.corrected_next_hop in self.routers[current].neighbours and self.routers[correction.corrected_next_hop].available:
+                    try:
+                        target_path = self.choose_path(correction.corrected_next_hop, destination)
+                        if current not in target_path:
+                            return correction.corrected_next_hop
+                    except (KeyError, RuntimeError):
+                        pass
+                self._authenticated_corrections.pop(correction_key, None)
         expected = self.choose_path(current, destination)[1] if current != destination else current
         if address is None: return expected
         key = (current, address.value, expected)

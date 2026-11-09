@@ -7,17 +7,20 @@ from .monitor import DiagnosticMonitor
 from .network import SpectralNetwork
 from .packet import Packet, PacketType
 from .control import ControlPlane
+from .packet_auth import PacketAuthenticator
 
 
 class SpectralRuntime:
     def __init__(self, network: SpectralNetwork,
                  database: Optional[SpectralDatabase] = None,
                  monitor: Optional[DiagnosticMonitor] = None,
-                 control_plane: Optional[ControlPlane] = None):
+                 control_plane: Optional[ControlPlane] = None,
+                 packet_authenticator: Optional[PacketAuthenticator] = None):
         self.network = network
         self.database = database or SpectralDatabase()
         self.monitor = monitor or DiagnosticMonitor(Path.home() / ".spectral-core" / "diagnostics.jsonl")
         self.control_plane = control_plane
+        self.packet_authenticator = packet_authenticator
         self.network.set_monitor(self.monitor)
         self.monitor.self_check(self.network, self.database)
 
@@ -64,7 +67,10 @@ class SpectralRuntime:
             raise
 
     def write(self, source: SpectralAddress, destination: SpectralAddress, payload: bytes):
-        return self.send(Packet(source, destination, payload))
+        packet = Packet(source, destination, payload)
+        if self.packet_authenticator is not None:
+            packet.auth_tag = self.packet_authenticator.sign(packet)
+        return self.send(packet)
 
     def read(self, address: SpectralAddress):
         value = self.database.get(address)
@@ -75,6 +81,11 @@ class SpectralRuntime:
 
     def send(self, packet: Packet, authorization=None):
         path_override = None
+        if self.packet_authenticator is not None and not self.packet_authenticator.verify(packet):
+            self.monitor.emit("packet_rejected", level="warning", packet_id=packet.packet_id,
+                              reason="packet_authentication_failed",
+                              packet_type=packet.packet_type.value)
+            raise PermissionError("Packet authentication or integrity check failed")
         if packet.packet_type is PacketType.ORDINARY:
             if authorization is not None:
                 raise PermissionError("Ordinary packets cannot carry privileged authorizations")
@@ -90,6 +101,11 @@ class SpectralRuntime:
                               reason="unsupported_control_packet",
                               packet_type=packet.packet_type.value)
             raise PermissionError("Control packets are not data-plane packets")
+        if not self.database.claim_packet(packet.packet_id, packet.source.value):
+            self.monitor.emit("packet_rejected", level="warning", packet_id=packet.packet_id,
+                              reason="duplicate_or_replayed_packet",
+                              packet_type=packet.packet_type.value)
+            raise PermissionError("Duplicate or replayed packet ID")
         path = self.route(packet, path_override)
         try:
             self.database.put(packet.destination, packet.payload)

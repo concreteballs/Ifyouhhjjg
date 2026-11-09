@@ -117,7 +117,7 @@ To reduce routing loops without storing the complete route in every packet:
 
 A malicious or compromised router must not be able to add an arbitrary destination to a network-wide forbidden list merely by returning a correction. Network-wide policy changes require authenticated authority and independent validation.
 
-The exact correction protocol and trust model will be tested in the emulator.
+The emulator implements a v1 correction message signed with HMAC-SHA256. It binds the packet ID, destination, previous router, reporting router, rejected next hop, corrected next hop, expiry and policy version. The previous router accepts it only if both next hops are valid neighbours, the corrected route is reachable without looping back through the previous router, the signature and nonce are valid, and no conflicting correction is already active for that destination. The correction is temporary and destination-scoped; it never modifies or blacklists the destination identifier. Nonce and correction state are currently in-memory only and are not synchronized across router processes.
 
 ## 6. Local monitoring and neighbour assistance
 

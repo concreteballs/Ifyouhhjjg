@@ -33,4 +33,6 @@ Some implementation text was generated with an AI assistant and reviewed/edited 
 
 ## Repository license status
 
-There is currently no `LICENSE` file. Under the default copyright rules, this does not grant the public general permission to reuse, modify, or distribute the source. GitHub users can still view and fork a public repository under GitHub's platform terms. The project owner should decide separately whether to keep all rights reserved or issue a commercial/open-source license.
+A custom source-available Personal-Use License draft is proposed in `LICENSE`. It is intended to grant free personal non-commercial use while requiring a separate written agreement for commercial use. Donations are voluntary and do not grant additional rights. Premium/Premium Pro are intended as optional product/service tiers and do not themselves grant commercial source-code rights. See `docs/COMMERCIAL_MODEL.md`.
+
+This is not an OSI-approved open-source license: open-source licenses cannot prohibit commercial use. The draft is not legal advice and must be reviewed by qualified counsel before being treated as a final license. Confirm ownership and contributor rights before release. GitHub users can view and fork public repositories under GitHub's platform terms, but that does not provide general reuse permissions.

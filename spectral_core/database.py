@@ -2,6 +2,7 @@
 import os
 import sqlite3
 import stat
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional, Union
@@ -102,6 +103,42 @@ class SpectralDatabase:
         except Exception:
             self.connection.rollback()
             raise
+
+    def backup_to(self, target_path: Union[str, Path]) -> Path:
+        """Create an atomic, owner-only SQLite backup at target_path."""
+        target = Path(target_path).expanduser()
+        if self.path != ":memory:" and target.resolve() == Path(self.path).resolve():
+            raise ValueError("Backup target must differ from the live database")
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if target.is_symlink():
+            raise ValueError("Backup target must not be a symbolic link")
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=target.name + ".", suffix=".tmp", dir=str(target.parent)
+        )
+        os.fchmod(fd, 0o600)
+        os.close(fd)
+        temporary = Path(temporary_name)
+        try:
+            destination = sqlite3.connect(str(temporary))
+            try:
+                self.connection.backup(destination)
+                destination.commit()
+            finally:
+                destination.close()
+            os.chmod(temporary, 0o600)
+            with temporary.open("rb") as handle:
+                os.fsync(handle.fileno())
+            os.replace(temporary, target)
+            os.chmod(target, 0o600)
+            if hasattr(os, "O_DIRECTORY"):
+                directory_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            return target
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def close(self):
         self.connection.close()

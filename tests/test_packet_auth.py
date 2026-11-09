@@ -35,10 +35,13 @@ class PacketAuthenticationTests(unittest.TestCase):
                                      auth_tag=packet.auth_tag)
         altered_type = Packet(self.source, self.destination, b"hello",
                               packet_type=PacketType.DETOUR, auth_tag=packet.auth_tag)
+        altered_id = Packet(self.source, self.destination, b"hello", packet_id="different-id",
+                            auth_tag=packet.auth_tag)
 
         self.assertFalse(self.authenticator.verify(altered_payload))
         self.assertFalse(self.authenticator.verify(altered_destination))
         self.assertFalse(self.authenticator.verify(altered_type))
+        self.assertFalse(self.authenticator.verify(altered_id))
 
     def test_unsigned_packet_is_rejected_when_authenticator_is_configured(self):
         with tempfile.TemporaryDirectory() as directory:

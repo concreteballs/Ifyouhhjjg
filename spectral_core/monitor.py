@@ -56,6 +56,8 @@ class DiagnosticMonitor:
         self.external_spool_path = (
             self.report_path.with_name("external-pending.jsonl") if self.report_path else None
         )
+        if external_endpoint and self.report_path is None:
+            raise ValueError("Persistent report_path is required for external forwarding")
         if external_endpoint:
             parsed = urllib.parse.urlparse(external_endpoint)
             if parsed.scheme != "https" and not (
@@ -121,7 +123,11 @@ class DiagnosticMonitor:
                     handle.flush()
                     os.fsync(handle.fileno())
         if self.external_endpoint:
-            if not self._forward_report(report):
+            pending = self.external_spool_path.exists() and self.external_spool_path.stat().st_size > 0
+            if pending:
+                self._spool_external(report)
+                self.flush_external_spool()
+            elif not self._forward_report(report):
                 self._spool_external(report)
         return report
 

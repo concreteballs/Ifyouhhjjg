@@ -20,7 +20,8 @@ This document distinguishes implemented controls from work still required. A pas
 ### Packet security
 - [ ] Define a versioned packet envelope and threat model.
 - [x] Add opt-in end-to-end sender authentication and payload integrity using standard HMAC-SHA256 (application-injected source-key mapping; key lifecycle remains open).
-- [x] Add versioned owner-only key-file provisioning, rotation and revocation; bind source endpoint IDs to configured keys.\n- [ ] Add coordinated dual-key rotation/recovery and stronger endpoint identity provisioning; key files remain unencrypted at rest and must be distributed out of band.
+- [x] Add versioned owner-only key-file provisioning, rotation and revocation; bind source endpoint IDs to configured keys.
+- [ ] Add coordinated dual-key rotation/recovery and stronger endpoint identity provisioning; key files remain unencrypted at rest and must be distributed out of band.
 - [x] Add persistent duplicate/replay protection with bounded retention and atomic acceptance (packet-ID receipts; 24-hour default).
 - [ ] Ensure retries and legitimate retransmissions have explicit, testable semantics.
 - [ ] Keep privileged detour/control authorization separate from ordinary packet authentication.
@@ -33,7 +34,8 @@ This document distinguishes implemented controls from work still required. A pas
 
 ### Storage and operations
 - [x] Apply restrictive owner-only permissions to the main file-backed SQLite database on POSIX systems; WAL/journal sidecar permissions still need separate review.
-- [x] Add atomic SQLite backup creation with owner-only file permissions and replay-receipt preservation tests.\n- [ ] Define restore/recovery procedure and evaluate encryption-at-rest requirements and key custody.
+- [x] Add atomic SQLite backup creation with owner-only file permissions and replay-receipt preservation tests.
+- [ ] Define restore/recovery procedure and evaluate encryption-at-rest requirements and key custody.
 - [x] Add bounded JSONL rotation for internal and external diagnostic archives, plus a hard-capped external spool with an explicit dropped-report counter.
 - [ ] Add stress tests for slow/unavailable collectors, disk-full conditions, concurrent writes, and restart recovery.
 - [ ] Review SQLite transaction and thread-safety assumptions before multi-threaded deployment.

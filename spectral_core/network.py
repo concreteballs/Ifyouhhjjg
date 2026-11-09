@@ -203,7 +203,14 @@ class SpectralNetwork:
     def apply_route_correction(self, message: RouteCorrectionMessage,
                                authority: RouteCorrectionAuthority) -> bool:
         """Validate topology and signature before caching a destination-scoped correction."""
-        if not isinstance(message, RouteCorrectionMessage):
+        if not isinstance(message, RouteCorrectionMessage) or not isinstance(authority, RouteCorrectionAuthority):
+            return False
+        try:
+            authority._validate_fields(
+                message.packet_id, message.destination_id, message.previous_router,
+                message.reporting_router, message.rejected_next_hop, message.corrected_next_hop,
+            )
+        except (TypeError, ValueError):
             return False
         previous = self.routers.get(message.previous_router)
         reporting = self.routers.get(message.reporting_router)

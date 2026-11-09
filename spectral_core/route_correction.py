@@ -88,7 +88,7 @@ class RouteCorrectionAuthority:
             policy_version, signature,
         )
 
-    def verify_and_consume(self, message, packet_id=None) -> bool:
+    def verify_and_consume(self, message, packet_id=None, database=None) -> bool:
         if not isinstance(message, RouteCorrectionMessage):
             return False
         try:
@@ -124,9 +124,10 @@ class RouteCorrectionAuthority:
         expected = hmac.new(self._secret, self._payload(fields), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, message.signature):
             return False
-        if self.database is not None:
+        nonce_store = database if database is not None else self.database
+        if nonce_store is not None:
             try:
-                return self.database.claim_route_correction_nonce(
+                return nonce_store.claim_route_correction_nonce(
                     message.nonce, message.expires_at, now=now
                 )
             except (OSError, RuntimeError, ValueError):

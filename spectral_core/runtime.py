@@ -21,6 +21,7 @@ class SpectralRuntime:
         self.monitor = monitor or DiagnosticMonitor(Path.home() / ".spectral-core" / "diagnostics.jsonl")
         self.control_plane = control_plane
         self.packet_authenticator = packet_authenticator
+        self.network.set_database(self.database)
         self.network.set_monitor(self.monitor)
         self.monitor.self_check(self.network, self.database)
 

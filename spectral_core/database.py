@@ -43,6 +43,28 @@ class SpectralDatabase:
         self.connection.execute(
             "CREATE INDEX IF NOT EXISTS packet_receipts_expiry ON packet_receipts(expires_at)"
         )
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS route_correction_nonces (
+                nonce TEXT PRIMARY KEY,
+                expires_at INTEGER NOT NULL
+            )
+        """)
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS route_correction_nonces_expiry ON route_correction_nonces(expires_at)"
+        )
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS applied_route_corrections (
+                previous_router TEXT NOT NULL,
+                destination_id TEXT NOT NULL,
+                rejected_next_hop TEXT NOT NULL,
+                corrected_next_hop TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                PRIMARY KEY (previous_router, destination_id)
+            )
+        """)
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS applied_route_corrections_expiry ON applied_route_corrections(expires_at)"
+        )
         self.connection.commit()
         if self.path != ":memory:" and hasattr(os, "chmod"):
             os.chmod(self.path, 0o600)
@@ -100,6 +122,100 @@ class SpectralDatabase:
             accepted = cursor.rowcount == 1
             self.connection.commit()
             return accepted
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def claim_route_correction_nonce(self, nonce: str, expires_at: int,
+                                     now: Optional[int] = None) -> bool:
+        """Atomically consume a signed control-message nonce across restarts/processes."""
+        if not isinstance(nonce, str) or not 1 <= len(nonce) <= 128:
+            raise ValueError("nonce must be a non-empty string of at most 128 characters")
+        if isinstance(expires_at, bool) or not isinstance(expires_at, int):
+            raise ValueError("expires_at must be an integer")
+        current = int(time.time()) if now is None else now
+        if isinstance(current, bool) or not isinstance(current, int) or current < 0:
+            raise ValueError("now must be a non-negative integer")
+        if expires_at <= current:
+            return False
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self.connection.execute(
+                "DELETE FROM route_correction_nonces WHERE expires_at <= ?", (current,)
+            )
+            cursor = self.connection.execute(
+                "INSERT OR IGNORE INTO route_correction_nonces(nonce, expires_at) VALUES (?, ?)",
+                (nonce, expires_at),
+            )
+            accepted = cursor.rowcount == 1
+            self.connection.commit()
+            return accepted
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def put_route_correction(self, previous_router: str, destination_id: str,
+                             rejected_next_hop: str, corrected_next_hop: str,
+                             expires_at: int, now: Optional[int] = None) -> bool:
+        """Persist an active correction; reject a conflicting live correction atomically."""
+        values = (previous_router, destination_id, rejected_next_hop, corrected_next_hop)
+        if any(not isinstance(value, str) or not value or len(value) > 256 for value in values):
+            raise ValueError("route-correction identifiers must be non-empty bounded strings")
+        if isinstance(expires_at, bool) or not isinstance(expires_at, int):
+            raise ValueError("expires_at must be an integer")
+        current = int(time.time()) if now is None else now
+        if isinstance(current, bool) or not isinstance(current, int) or current < 0:
+            raise ValueError("now must be a non-negative integer")
+        if expires_at <= current:
+            return False
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self.connection.execute(
+                "DELETE FROM applied_route_corrections WHERE expires_at <= ?", (current,)
+            )
+            row = self.connection.execute(
+                """SELECT corrected_next_hop FROM applied_route_corrections
+                   WHERE previous_router = ? AND destination_id = ?""",
+                (previous_router, destination_id),
+            ).fetchone()
+            if row is not None and row[0] != corrected_next_hop:
+                self.connection.rollback()
+                return False
+            self.connection.execute(
+                """INSERT INTO applied_route_corrections
+                   (previous_router, destination_id, rejected_next_hop, corrected_next_hop, expires_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(previous_router, destination_id) DO UPDATE SET
+                     rejected_next_hop = excluded.rejected_next_hop,
+                     corrected_next_hop = excluded.corrected_next_hop,
+                     expires_at = MAX(applied_route_corrections.expires_at, excluded.expires_at)""",
+                (previous_router, destination_id, rejected_next_hop, corrected_next_hop, expires_at),
+            )
+            self.connection.commit()
+            return True
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def load_route_corrections(self, now: Optional[int] = None):
+        """Return unexpired persisted corrections and atomically discard expired rows."""
+        current = int(time.time()) if now is None else now
+        if isinstance(current, bool) or not isinstance(current, int) or current < 0:
+            raise ValueError("now must be a non-negative integer")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self.connection.execute(
+                "DELETE FROM applied_route_corrections WHERE expires_at <= ?", (current,)
+            )
+            rows = self.connection.execute(
+                """SELECT previous_router, destination_id, rejected_next_hop,
+                          corrected_next_hop, expires_at
+                   FROM applied_route_corrections WHERE expires_at > ?
+                   ORDER BY previous_router, destination_id""",
+                (current,),
+            ).fetchall()
+            self.connection.commit()
+            return rows
         except Exception:
             self.connection.rollback()
             raise

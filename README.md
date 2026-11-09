@@ -12,6 +12,7 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Local route-hint validation plus authenticated, expiring previous-hop route corrections.
 - Neighbour-assisted rerouting around unavailable routers.
 - HMAC-authenticated, expiring, one-use detour authorizations.
+- SQLite-persistent route-correction nonce replay protection and active correction recovery across process restarts.
 - Packet source/destination identity and hop-limit protection.
 - Optional HMAC-SHA256 packet origin and payload-integrity checks with owner-only versioned key-file provisioning.
 - SQLite endpoint data storage with owner-only file permissions on POSIX systems.

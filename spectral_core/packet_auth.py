@@ -38,6 +38,8 @@ class PacketAuthenticator:
     @classmethod
     def from_file(cls, key_file):
         path = Path(key_file).expanduser()
+        if path.is_symlink():
+            raise ValueError("Packet key file must not be a symbolic link")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags)
         try:
@@ -102,6 +104,8 @@ class PacketAuthenticator:
             },
         }
         encoded = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        if len(encoded) > 65536:
+            raise ValueError("Packet key registry exceeds 64 KiB")
         fd, temporary_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
         temporary = Path(temporary_name)
         try:

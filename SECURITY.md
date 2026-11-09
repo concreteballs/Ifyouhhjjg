@@ -18,7 +18,7 @@ Do not expose the diagnostic receiver directly to an untrusted network. For remo
 
 The current HMAC detour control plane is an in-process prototype. Its replay cache is held in memory and is not shared between processes or restarts. It is not a complete identity, role, key-rotation, or distributed authorization system.
 
-Ordinary packets do not yet have end-to-end sender authentication, payload integrity protection, encryption, or persistent duplicate/replay detection. SQLite data is not encrypted at rest by this project.
+Ordinary packets still do not have end-to-end sender authentication, payload integrity protection, or encryption. The SQLite store now records packet IDs atomically for a bounded 24-hour replay window by default; this detects repeated IDs but does not stop an attacker from forging a new packet ID. The receipt is consumed before routing, so a failed send must be retried as a new packet ID. SQLite data is not encrypted at rest by this project.
 
 The routing correction event is diagnostic feedback in the current emulator; the complete previous-hop correction-message protocol described in the design document is not yet implemented.
 

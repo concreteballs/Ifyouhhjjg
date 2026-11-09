@@ -28,13 +28,14 @@ class RouteCorrectionAuthority:
 
     MAX_USED_NONCES = 50000
 
-    def __init__(self, secret: bytes, max_ttl_seconds: int = 60):
+    def __init__(self, secret: bytes, max_ttl_seconds: int = 60, database=None):
         if not isinstance(secret, bytes) or len(secret) < 32:
             raise ValueError("Route-correction secret must contain at least 32 bytes")
         if isinstance(max_ttl_seconds, bool) or not isinstance(max_ttl_seconds, int) or max_ttl_seconds < 1:
             raise ValueError("max_ttl_seconds must be a positive integer")
         self._secret = bytes(secret)
         self.max_ttl_seconds = max_ttl_seconds
+        self.database = database
         self._used_nonces = {}
         self._lock = threading.Lock()
 
@@ -123,6 +124,13 @@ class RouteCorrectionAuthority:
         expected = hmac.new(self._secret, self._payload(fields), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, message.signature):
             return False
+        if self.database is not None:
+            try:
+                return self.database.claim_route_correction_nonce(
+                    message.nonce, message.expires_at, now=now
+                )
+            except (OSError, RuntimeError, ValueError):
+                return False
         with self._lock:
             self._used_nonces = {
                 nonce: expiry for nonce, expiry in self._used_nonces.items() if expiry > now

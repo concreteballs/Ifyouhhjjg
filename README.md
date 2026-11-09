@@ -10,9 +10,42 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Load-aware tie-breaking between equally short next hops.
 - Packet source/destination identity and hop-limit protection.
 - SQLite endpoint data storage.
+- Embedded diagnostic monitor connected to the live runtime.
+- Structured JSONL reports, health checks, error events and atomic status snapshots.
+- Diagnostic event allowlist and rejection of payload/secret fields.
 - Explicit rejection of unauthenticated detour/control packet types.
 
-The initial router is a working graph-routing baseline. It does not yet implement the complete responsibility-map correction protocol, authenticated central detours, neighbour assistance, or the future photonic interaction model. Those remain later milestones.
+## Internal diagnostic monitor
+
+The monitor starts automatically with `SpectralRuntime`.
+
+It records router creation, link changes, endpoint registration, route starts, individual hops, packet delivery, database reads/writes and rejected packets. Runtime errors are recorded with operation and exception metadata.
+
+The monitor never records packet payloads. It rejects unknown event types and sensitive field names. Reports use schema `spectral-core.diagnostic.v1`.
+
+By default, persistent reports are written locally to:
+
+```text
+~/.spectral-core/diagnostics.jsonl
+```
+
+The monitor can also run in memory for tests:
+
+```python
+from spectral_core import DiagnosticMonitor
+monitor = DiagnosticMonitor()
+```
+
+Inspect current status and export reports:
+
+```python
+status = runtime.diagnostics()
+jsonl = runtime.monitor.export_jsonl()
+runtime.monitor.write_status("diagnostics/status.json")
+health_report = runtime.run_diagnostics()
+```
+
+Reports remain local. There is no automatic upload to GitHub or another network service.
 
 ## Run tests
 
@@ -41,11 +74,14 @@ runtime = SpectralRuntime(network)
 route = runtime.write(source, destination, b"Hello Spectral Core")
 print(route)
 print(runtime.read(destination))
+print(runtime.diagnostics())
 ```
 
 ## Architecture direction
 
 The software interfaces are kept separate from the physical implementation. The first emulator uses ordinary Python objects and SQLite. A future photonic backend may replace selected cell or interaction operations without requiring application data to encode physical wavelength values.
+
+The current router is a working graph-routing baseline. It does not yet implement the complete responsibility-map correction protocol, authenticated central detours, neighbour assistance, or the future photonic interaction model.
 
 ## Next milestones
 

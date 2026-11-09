@@ -14,7 +14,12 @@ These modules are supplied by the Python runtime; they are not copied into this 
 
 ## Build and CI dependencies
 
-The GitHub Actions workflow uses only GitHub-maintained `actions/checkout` and `actions/setup-python`. Both are pinned to full commit SHAs rather than mutable tags. They are CI-only and are not shipped as Spectral Core runtime components.
+The GitHub Actions workflow uses only GitHub-maintained `actions/checkout` and `actions/setup-python`. Both are pinned to verified full commit SHAs rather than mutable tags:
+
+- `actions/checkout@11d5960a326750d5838078e36cf38b85af677262`
+- `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065`
+
+The referenced action source repositories declare the MIT License. These actions are CI-only and are not shipped as Spectral Core runtime components.
 
 ## Relationship to YJ-64
 

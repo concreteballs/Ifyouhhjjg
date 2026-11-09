@@ -25,3 +25,6 @@ The routing correction event is diagnostic feedback in the current emulator; the
 ## Reporting a vulnerability
 
 Please do not publish exploit details in a public issue. Contact the repository owner through the GitHub account that maintains this project and request a private disclosure channel. Include the affected commit, reproduction steps, and impact. Do not include real secrets or personal data.
+
+
+Diagnostic retention is bounded: the internal JSONL archive rotates by size (5 MiB, three backups by default), the external collector archive also rotates (5 MiB, three backups by default), and the pending external spool has a 10 MiB hard cap. If the spool is full, new pending reports are dropped rather than growing the disk indefinitely; the internal monitor exposes this count as `external_spool_dropped`. Operators must monitor that counter if external forwarding is enabled.

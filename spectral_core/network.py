@@ -89,7 +89,9 @@ class SpectralNetwork:
         tail = address.tail_first
         matches = [(len(p), r.router_id) for r in self.routers.values() if r.available
                    for p in r.responsibility_prefixes if tail.startswith(p)]
-        if matches:\n            return max(matches, key=lambda item: (item[0], item[1]))[1]\n        return self.owner_of(address)
+        if matches:
+            return max(matches, key=lambda item: (item[0], item[1]))[1]
+        return self.owner_of(address)
 
     def owner_of(self, address):
         try: owner = self.endpoints[address]

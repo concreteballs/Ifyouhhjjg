@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,10 +33,9 @@ class DiagnosticRetentionTests(unittest.TestCase):
     def test_external_spool_has_hard_size_limit_and_drop_counter(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "internal.jsonl"
-            monitor = DiagnosticMonitor(
-                path, external_endpoint="https://collector.invalid/reports",
-                external_token="t" * 32, max_spool_bytes=16384,
-            )
+            monitor = DiagnosticMonitor(path, max_spool_bytes=16384)
+            monitor.external_endpoint = "https://collector.invalid/reports"
+            monitor.external_token = "t" * 32
             for index in range(40):
                 monitor._spool_external(report(f"spool-{index}", "x" * 400))
             spool = path.with_name("external-pending.jsonl")

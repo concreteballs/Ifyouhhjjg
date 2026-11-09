@@ -37,7 +37,7 @@ This document distinguishes implemented controls from work still required. A pas
 ### Storage and operations
 - [x] Apply restrictive owner-only permissions to the main file-backed SQLite database and SQLite `-journal`, `-wal`, and `-shm` sidecars on POSIX systems; test both DELETE-journal and WAL modes.
 - [x] Add atomic SQLite backup creation with owner-only file permissions and replay-receipt preservation tests.
-- [x] Add an atomic `restore_from(backup, target)` recovery operation with SQLite integrity checks and tests covering endpoint data, packet receipts, route-correction nonces, and active corrections. The target database must be closed and not in use.
+- [x] Add an atomic `restore_from(backup, target)` recovery operation with SQLite integrity checks and tests covering endpoint data, packet receipts, route-correction nonces, and active corrections. The target must be a new path with no pre-existing SQLite sidecars.
 - [ ] Define operational backup retention, off-device storage, recovery-point objectives, and evaluate encryption-at-rest requirements and key custody.
 - [x] Add bounded JSONL rotation for internal and external diagnostic archives, plus a hard-capped external spool with an explicit dropped-report counter.
 - [ ] Add stress tests for slow/unavailable collectors, disk-full conditions, concurrent writes, and restart recovery.

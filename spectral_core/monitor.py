@@ -68,6 +68,8 @@ class DiagnosticMonitor:
             raise ValueError("Persistent report_path is required for external forwarding")
         if external_endpoint:
             parsed = urllib.parse.urlparse(external_endpoint)
+            if not parsed.hostname or parsed.query:
+                raise ValueError("External monitor URL must include a host and must not contain a query")
             if parsed.username or parsed.password or parsed.fragment:
                 raise ValueError("External monitor URL must not contain credentials or fragments")
             if parsed.scheme != "https" and not (
@@ -85,7 +87,9 @@ class DiagnosticMonitor:
 
     @staticmethod
     def _validate_data(data: dict[str, Any]) -> dict[str, Any]:
-        def check(value: Any, key: str = "") -> Any:
+        def check(value: Any, key: str = "", depth: int = 0) -> Any:
+            if depth > 8:
+                raise ValueError("Diagnostic nesting limit exceeded")
             if key.lower() in FORBIDDEN_KEYS:
                 raise ValueError(f"Diagnostic field is not allowed: {key}")
             if value is None or isinstance(value, (str, int, float, bool)):
@@ -97,11 +101,11 @@ class DiagnosticMonitor:
             if isinstance(value, (list, tuple)):
                 if len(value) > 100:
                     raise ValueError(f"Diagnostic list is too large: {key}")
-                return [check(item, key) for item in value]
+                return [check(item, key, depth + 1) for item in value]
             if isinstance(value, dict):
                 if len(value) > 50:
                     raise ValueError(f"Diagnostic object is too large: {key}")
-                return {str(k): check(v, str(k)) for k, v in value.items()}
+                return {str(k): check(v, str(k), depth + 1) for k, v in value.items()}
             raise TypeError(f"Unsupported diagnostic value for {key}: {type(value).__name__}")
         if not isinstance(data, dict):
             raise TypeError("Diagnostic data must be an object")
@@ -169,16 +173,17 @@ class DiagnosticMonitor:
     def _spool_external(self, report: dict[str, Any]) -> None:
         if self.external_spool_path is None:
             return
-        self.external_spool_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(self.external_spool_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
-                handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
-                handle.flush()
-                os.fsync(fd)
-        finally:
-            os.close(fd)
+        with self._lock:
+            self.external_spool_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(self.external_spool_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
+                    handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+                    handle.flush()
+                    os.fsync(fd)
+            finally:
+                os.close(fd)
 
     def flush_external_spool(self) -> int:
         """Retry pending reports in order; keep the first unacknowledged record and tail."""

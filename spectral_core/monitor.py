@@ -145,7 +145,7 @@ class DiagnosticMonitor:
             return
         self.external_spool_path.parent.mkdir(parents=True, exist_ok=True)
         with self.external_spool_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\\n")
+            handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
 
@@ -171,7 +171,7 @@ class DiagnosticMonitor:
                 blocked = True
                 remaining.append(line)
         temporary = self.external_spool_path.with_suffix(".tmp")
-        temporary.write_text("".join(line + "\\n" for line in remaining), encoding="utf-8")
+        temporary.write_text("".join(line + "\n" for line in remaining), encoding="utf-8")
         os.replace(temporary, self.external_spool_path)
         return sent
 

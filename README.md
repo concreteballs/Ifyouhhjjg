@@ -79,7 +79,11 @@ monitor = DiagnosticMonitor(
 
 The receiver binds only to `127.0.0.1`; it cannot be configured to listen publicly. Its token must be stored in an owner-only file with at least 32 characters. The receiver exposes read-only health at `GET /health` and report ingestion at `POST /v1/reports`. It has no command, file-path or arbitrary action endpoint. For remote forwarding, place a separately managed HTTPS reverse proxy in front of the loopback service; do not expose the built-in HTTP server directly.
 
-## Security and provenance\n\nSee [SECURITY.md](SECURITY.md) for the current security boundary and known limitations, and [PROVENANCE.md](PROVENANCE.md) for the runtime/CI dependency and licensing record. The repository uses a custom source-available personal-use license draft; see [LICENSE](LICENSE) and [docs/COMMERCIAL_MODEL.md](docs/COMMERCIAL_MODEL.md). It is not an OSI-approved open-source license and must receive legal review before release.\n\n## Run tests
+## Security and provenance
+
+See [SECURITY.md](SECURITY.md) for the current security boundary and known limitations, and [PROVENANCE.md](PROVENANCE.md) for the runtime/CI dependency and licensing record. The repository uses a custom source-available personal-use license draft; see [LICENSE](LICENSE) and [docs/COMMERCIAL_MODEL.md](docs/COMMERCIAL_MODEL.md). It is not an OSI-approved open-source license and must receive legal review before release.
+
+## Run tests
 
 Python 3.10 or newer is recommended. No third-party packages are required.
 

@@ -11,13 +11,15 @@ class AuthenticatedRouteCorrectionTests(unittest.TestCase):
         self.network = SpectralNetwork()
         for router_id, position in (
             ("r0", (0, 0)), ("r1", (1, 0)),
-            ("r2", (0, 1)), ("r3", (1, 1)),
+            ("r2", (0, 1)), ("r3", (1, 1)), ("r4", (2, 0)),
         ):
             self.network.add_router(Router(router_id, position))
         self.network.connect("r0", "r1")
         self.network.connect("r0", "r2")
         self.network.connect("r1", "r3")
         self.network.connect("r2", "r3")
+        self.network.connect("r0", "r4")
+        self.network.connect("r4", "r3")
         self.network.set_load("r1", 10)
         self.source = SpectralAddress("123")
         self.destination = SpectralAddress("987")
@@ -47,6 +49,18 @@ class AuthenticatedRouteCorrectionTests(unittest.TestCase):
             rejected_next_hop="r1", corrected_next_hop="r3",
         )
         self.assertFalse(self.network.apply_route_correction(invalid_topology, self.authority))
+
+    def test_conflicting_active_correction_is_rejected(self):
+        first = self.network.issue_route_correction(
+            self.authority, "packet-46", self.destination, "r0", "r1"
+        )
+        self.assertTrue(self.network.apply_route_correction(first, self.authority))
+        conflicting = self.authority.issue(
+            packet_id="packet-47", destination_id=self.destination.value,
+            previous_router="r0", reporting_router="r1",
+            rejected_next_hop="r1", corrected_next_hop="r4",
+        )
+        self.assertFalse(self.network.apply_route_correction(conflicting, self.authority))
 
     def test_correction_is_scoped_to_packet_destination_and_topology(self):
         message = self.network.issue_route_correction(

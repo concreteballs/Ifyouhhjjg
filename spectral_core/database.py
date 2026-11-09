@@ -296,6 +296,9 @@ class SpectralDatabase:
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if target.is_symlink():
             raise ValueError("Restore target must not be a symbolic link")
+        if target.exists() or any(Path(str(target) + suffix).exists()
+                                  for suffix in ("-journal", "-wal", "-shm")):
+            raise ValueError("Restore target and SQLite sidecars must not already exist")
         fd, temporary_name = tempfile.mkstemp(
             prefix=target.name + ".", suffix=".restore.tmp", dir=str(target.parent)
         )

@@ -62,7 +62,7 @@ class DiagnosticMonitor:
                  report_backups: int = 3,
                  max_spool_bytes: int = 10 * 1024 * 1024):
         for name, value, minimum in (
-            ("max_report_bytes", max_report_bytes, 16384),
+            ("max_report_bytes", max_report_bytes, 16385),
             ("report_backups", report_backups, 0),
             ("max_spool_bytes", max_spool_bytes, 16384),
         ):

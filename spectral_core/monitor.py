@@ -11,6 +11,8 @@ import tempfile
 import threading
 import time
 import uuid
+import urllib.request
+import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -45,8 +47,23 @@ FORBIDDEN_KEYS = {
 class DiagnosticMonitor:
     """Thread-safe event monitor with optional durable JSONL report storage."""
 
-    def __init__(self, report_path: Optional[str | Path] = None):
+    def __init__(self, report_path: Optional[str | Path] = None,
+                 external_endpoint: Optional[str] = None,
+                 external_token: Optional[str] = None):
         self.report_path = Path(report_path).expanduser() if report_path else None
+        self.external_endpoint = external_endpoint
+        self.external_token = external_token
+        self.external_spool_path = (
+            self.report_path.with_name("external-pending.jsonl") if self.report_path else None
+        )
+        if external_endpoint:
+            parsed = urllib.parse.urlparse(external_endpoint)
+            if parsed.scheme != "https" and not (
+                parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+            ):
+                raise ValueError("External monitor endpoint must use HTTPS or loopback HTTP")
+            if not external_token:
+                raise ValueError("External monitor token is required when forwarding is enabled")
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []
         self._last_error: Optional[dict[str, Any]] = None
@@ -103,7 +120,60 @@ class DiagnosticMonitor:
                     handle.write(encoded + "\n")
                     handle.flush()
                     os.fsync(handle.fileno())
+        if self.external_endpoint:
+            if not self._forward_report(report):
+                self._spool_external(report)
         return report
+
+    def _forward_report(self, report: dict[str, Any]) -> bool:
+        body = json.dumps(report, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        request = urllib.request.Request(
+            self.external_endpoint, data=body,
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + str(self.external_token)},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=2.0) as response:
+                ack = json.loads(response.read(4096).decode("utf-8"))
+                return 200 <= response.status < 300 and ack.get("report_id") == report["report_id"] and ack.get("ok") is True
+        except (OSError, ValueError, TypeError):
+            return False
+
+    def _spool_external(self, report: dict[str, Any]) -> None:
+        if self.external_spool_path is None:
+            return
+        self.external_spool_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.external_spool_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def flush_external_spool(self) -> int:
+        """Retry pending reports in order; keep the first unacknowledged record and tail."""
+        if not self.external_endpoint or self.external_spool_path is None or not self.external_spool_path.is_file():
+            return 0
+        lines = self.external_spool_path.read_text(encoding="utf-8").splitlines()
+        sent = 0
+        remaining = []
+        blocked = False
+        for line in lines:
+            if blocked:
+                remaining.append(line)
+                continue
+            try:
+                report = json.loads(line)
+            except ValueError:
+                continue
+            if self._forward_report(report):
+                sent += 1
+            else:
+                blocked = True
+                remaining.append(line)
+        temporary = self.external_spool_path.with_suffix(".tmp")
+        temporary.write_text("".join(line + "\\n" for line in remaining), encoding="utf-8")
+        os.replace(temporary, self.external_spool_path)
+        return sent
 
     def record_exception(self, operation: str, error: Exception, **context: Any) -> None:
         self.emit(

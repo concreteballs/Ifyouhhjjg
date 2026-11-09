@@ -37,6 +37,7 @@ class SpectralRuntime:
             else:
                 path = [source_router]
                 current = source_router
+                previous = None
                 remaining = packet.hop_limit
                 self.monitor.emit("route_started", packet_id=packet.packet_id,
                                   source_id=packet.source.value,
@@ -45,10 +46,11 @@ class SpectralRuntime:
                 while current != destination_router:
                     if remaining <= 1:
                         raise RuntimeError("Packet hop limit exhausted")
-                    next_hop = self.network.choose_next_hop(current, destination_router, packet.destination)
+                    next_hop = self.network.choose_next_hop(current, destination_router, packet.destination, previous)
                     self.monitor.emit("route_hop", packet_id=packet.packet_id,
                                       current_router=current, next_router=next_hop,
                                       remaining_hops=remaining - 1)
+                    previous = current
                     current = next_hop
                     path.append(current)
                     remaining -= 1

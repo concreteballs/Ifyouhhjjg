@@ -15,7 +15,8 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Packet source/destination identity and hop-limit protection.
 - Optional HMAC-SHA256 packet origin and payload-integrity checks with owner-only versioned key-file provisioning.
 - SQLite endpoint data storage with owner-only file permissions on POSIX systems.
-- Persistent, atomic packet-ID replay receipts with a 24-hour default retention window.\n- Atomic SQLite backup API that preserves endpoint data and replay receipts.
+- Persistent, atomic packet-ID replay receipts with a 24-hour default retention window.
+- Atomic SQLite backup API that preserves endpoint data and replay receipts.
 - Embedded diagnostic monitor connected to the live runtime.
 - Structured JSONL reports with bounded rotation, capped external forwarding spool, health checks, error events and atomic status snapshots.
 - Diagnostic event allowlist and rejection of payload/secret fields.

@@ -26,9 +26,10 @@ This document distinguishes implemented controls from work still required. A pas
 - [ ] Keep privileged detour/control authorization separate from ordinary packet authentication.
 
 ### Routing correction
-- [ ] Implement authenticated correction messages to the previous router.
-- [ ] Bind each correction to packet ID, destination, reporting router, rejected transition, corrected transition, expiry, and policy version.
-- [ ] Reject stale, forged, conflicting, and out-of-scope corrections without changing destination identity or creating a global destination blacklist.
+- [x] Implement authenticated, expiring HMAC correction messages to the previous router.
+- [x] Bind corrections to packet ID, destination, previous/reporting routers, rejected/corrected next hops, expiry, and policy version.
+- [x] Reject stale, forged, conflicting, non-neighbour and looping corrections without changing destination identity or creating a global destination blacklist.
+- [ ] Persist correction nonce/replay state across process restarts and coordinate correction policy versions across routers.
 
 ### Storage and operations
 - [x] Apply restrictive owner-only permissions to the main file-backed SQLite database on POSIX systems; WAL/journal sidecar permissions still need separate review.

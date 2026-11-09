@@ -7,6 +7,7 @@ from .monitor import DiagnosticMonitor
 from .network import SpectralNetwork
 from .packet import Packet, PacketType
 from .control import ControlPlane
+import time
 
 
 class SpectralRuntime:
@@ -90,6 +91,11 @@ class SpectralRuntime:
                               reason="unsupported_control_packet",
                               packet_type=packet.packet_type.value)
             raise PermissionError("Control packets are not data-plane packets")
+        if not self.database.claim_packet(packet.packet_id, packet.source.value):
+            self.monitor.emit("packet_rejected", level="warning", packet_id=packet.packet_id,
+                              reason="duplicate_or_replayed_packet",
+                              packet_type=packet.packet_type.value)
+            raise PermissionError("Duplicate or replayed packet ID")
         path = self.route(packet, path_override)
         try:
             self.database.put(packet.destination, packet.payload)

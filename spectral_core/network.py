@@ -233,9 +233,13 @@ class SpectralNetwork:
             return False
         if message.previous_router in corrected_path:
             return False
+        correction_key = (message.previous_router, destination.value)
+        existing = self._authenticated_corrections.get(correction_key)
+        if existing and existing.expires_at > time.time() and existing.corrected_next_hop != message.corrected_next_hop:
+            return False
         if not authority.verify_and_consume(message, packet_id=message.packet_id):
             return False
-        self._authenticated_corrections[(message.previous_router, destination.value)] = RoutingCorrection(
+        self._authenticated_corrections[correction_key] = RoutingCorrection(
             message.previous_router, destination.value, message.reporting_router,
             message.corrected_next_hop, float(message.expires_at),
         )

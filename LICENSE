@@ -1,0 +1,105 @@
+SPECTRAL CORE PERSONAL-USE LICENSE
+Version 0.1 — DRAFT FOR LEGAL REVIEW
+Copyright (c) 2026 the applicable Spectral Core rights holder(s).
+All rights reserved except for the limited permission below.
+
+IMPORTANT: This is a project-specific, source-available draft. It is not an
+OSI-approved open-source license and has not been reviewed by qualified
+counsel. Do not treat this draft as a substitute for a signed commercial
+agreement or legal advice.
+
+1. Definitions
+
+"Software" means the Spectral Core source code and accompanying materials
+identified by the project rights holder as being offered under this License.
+
+"Personal Non-Commercial Use" means use by an individual for private,
+personal, educational, hobby, or non-commercial research purposes, where
+the Software is not used to provide goods or services for payment, operate a
+business or commercial service, or support the commercial operations of an
+organization.
+
+"Commercial Use" includes use in or for a business, company, paid product,
+paid service, production or internal business infrastructure, commercial
+research, or any activity primarily intended to obtain commercial advantage
+or monetary compensation.
+
+2. Free personal permission
+
+Subject to this License, the rights holder grants each individual a
+worldwide, non-exclusive, royalty-free, revocable only as stated by law
+permission to download, install, run, study, and modify the Software solely
+for that individual's Personal Non-Commercial Use.
+
+The individual may make reasonable private backup copies. Modified copies
+remain subject to this License.
+
+3. Restrictions
+
+Unless the rights holder gives prior written permission or a separate
+agreement applies, you may not:
+
+(a) make Commercial Use of the Software;
+(b) sell, sublicense, rent, lease, host, or provide the Software as a
+    commercial product or service;
+(c) redistribute, publish, or make available copies or modified versions
+    of the Software to third parties;
+(d) remove copyright, attribution, or license notices;
+(e) imply endorsement by the project or its rights holder.
+
+Nothing in this section prohibits rights that cannot lawfully be restricted.
+
+4. Donations and supporter contributions
+
+Voluntary donations support project development. A donation is not a
+purchase, does not create ownership, does not grant Commercial Use rights,
+and does not change the permissions in this License.
+
+5. Premium and Premium Pro
+
+The project may offer optional paid Premium or Premium Pro plans. Such plans
+may provide access to additional hosted features, support, capacity, tools,
+or services under separate plan terms. Payment for a plan does not by itself
+grant rights to use the Software commercially, redistribute its source, or
+sublicense it. Any additional rights must be stated expressly in the
+applicable plan terms or a separate written agreement.
+
+6. Commercial licensing
+
+Commercial Use may be authorized only by a separate written agreement
+signed by the rights holder or an authorized representative. The agreement
+may define permitted products, deployments, users, territories, duration,
+support, fees, redistribution rights, and other conditions. Contact the
+project maintainer through the official repository to begin discussions;
+no commercial permission is granted merely by making an inquiry.
+
+7. Ownership and third-party materials
+
+The Software is licensed, not sold. The rights holder and other applicable
+copyright owners retain all rights not expressly granted. This License
+does not claim ownership of third-party materials, dependencies, or
+contributions whose rights are held by others; those materials remain
+subject to their own applicable terms.
+
+8. No warranty and limitation
+
+The Software is experimental and is provided "AS IS", to the maximum extent
+permitted by applicable law, without warranties of any kind. The rights
+holder is not liable for claims or damages arising from use of the Software,
+except where such exclusion or limitation is prohibited by law.
+
+9. Termination
+
+The permissions granted under this License terminate automatically if you
+materially violate its terms. If the violation is capable of remedy, the
+rights holder may allow a reasonable opportunity to cure it. Upon
+termination, stop using and delete copies of the Software in your
+possession, except where retention is required by law.
+
+10. Governing law
+
+Applicable law and jurisdiction must be specified in a finalized version
+or in a separate agreement. Mandatory consumer and other non-waivable legal
+protections remain unaffected.
+
+END OF DRAFT

@@ -2,7 +2,7 @@
 
 This document distinguishes implemented controls from work still required. A passing test suite is not a security certification.
 
-## Implemented and tested baseline
+## Implemented baseline (regression tests added; CI verification pending)
 
 - [x] External diagnostic receiver binds to loopback only.
 - [x] Bearer token is loaded from an owner-only file and must be at least 32 characters.
@@ -31,7 +31,7 @@ This document distinguishes implemented controls from work still required. A pas
 - [ ] Reject stale, forged, conflicting, and out-of-scope corrections without changing destination identity or creating a global destination blacklist.
 
 ### Storage and operations
-- [ ] Apply restrictive permissions to file-backed SQLite databases and assess WAL/journal/backup files.
+- [x] Apply restrictive owner-only permissions to the main file-backed SQLite database on POSIX systems; WAL/journal/backup handling still needs separate review.
 - [ ] Define backup and recovery behaviour; evaluate encryption-at-rest requirements and key custody.
 - [ ] Add bounded log rotation/retention for JSONL reports and external spool files.
 - [ ] Add stress tests for slow/unavailable collectors, disk-full conditions, concurrent writes, and restart recovery.

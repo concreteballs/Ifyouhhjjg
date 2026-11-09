@@ -17,6 +17,11 @@ on:
       - "spectral_core/**"
       - "spectral_monitor/**"
       - "tests/**"
+      - "docs/**"
+      - "README.md"
+      - "SECURITY.md"
+      - "PROVENANCE.md"
+      - "LICENSE"
       - ".github/workflows/spectral-core-tests.yml"
   workflow_dispatch:
 

@@ -43,6 +43,13 @@ class RoutingControlTests(unittest.TestCase):
         finally:
             db.close()
 
+
+    def test_responsibility_prefix_can_take_over_from_unavailable_owner(self):
+        network, _, destination = self.make_network()
+        network.assign_responsibility("r2", "789")
+        network.set_router_availability("r3", False)
+        self.assertEqual(network.responsibility_owner(destination), "r2")
+
     def test_neighbour_assistance_routes_around_failed_node(self):
         network, _, _ = self.make_network()
         path = network.neighbour_assistance("r1","r0","r3")

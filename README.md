@@ -17,7 +17,7 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - SQLite endpoint data storage with owner-only file permissions on POSIX systems.
 - Persistent, atomic packet-ID replay receipts with a 24-hour default retention window.
 - Embedded diagnostic monitor connected to the live runtime.
-- Structured JSONL reports, health checks, error events and atomic status snapshots.
+- Structured JSONL reports with bounded rotation, capped external forwarding spool, health checks, error events and atomic status snapshots.
 - Diagnostic event allowlist and rejection of payload/secret fields.
 - Explicit rejection of unauthenticated detour/control packet types.
 - Optional standalone external diagnostic collector with allowlisted report ingestion, durable acknowledgements and a loopback-only HTTP bridge.

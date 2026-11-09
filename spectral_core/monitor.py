@@ -30,6 +30,11 @@ ALLOWED_EVENTS = {
     "database_delete",
     "runtime_error",
     "health_check",
+    "responsibility_assigned",
+    "route_correction",
+    "router_availability",
+    "router_load",
+    "neighbour_assistance",
 }
 FORBIDDEN_KEYS = {
     "payload", "content", "token", "secret", "password", "private_key",

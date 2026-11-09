@@ -28,6 +28,19 @@ class SpectralNetwork:
 
     def set_monitor(self, monitor):
         self.monitor = monitor
+        # Attach diagnostics to an already-built network: replay its current
+        # topology so the monitor starts with a complete baseline snapshot.
+        for router_id, router in self.routers.items():
+            self._event("router_added", router_id=router_id, position=list(router.position))
+        seen_links = set()
+        for router_id, router in self.routers.items():
+            for neighbour_id in router.neighbours:
+                link = tuple(sorted((router_id, neighbour_id)))
+                if link not in seen_links:
+                    self._event("link_connected", first=link[0], second=link[1])
+                    seen_links.add(link)
+        for address, router_id in self.endpoints.items():
+            self._event("endpoint_registered", spectral_id=address.value, router_id=router_id)
 
     def _event(self, event, **data):
         if self.monitor is not None:

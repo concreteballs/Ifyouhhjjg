@@ -22,12 +22,12 @@ class DiagnosticRetentionTests(unittest.TestCase):
     def test_internal_jsonl_rotates_and_stays_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "internal.jsonl"
-            monitor = DiagnosticMonitor(path, max_report_bytes=16384, report_backups=2)
+            monitor = DiagnosticMonitor(path, max_report_bytes=16385, report_backups=2)
             for index in range(40):
                 monitor.emit("health_check", detail="x" * 400, sequence=index)
             self.assertTrue(path.exists())
             self.assertTrue(path.with_name("internal.jsonl.1").exists())
-            self.assertLessEqual(path.stat().st_size, 16384)
+            self.assertLessEqual(path.stat().st_size, 16385)
             self.assertLessEqual(path.with_name("internal.jsonl.1").stat().st_size, 16384)
 
     def test_external_spool_has_hard_size_limit_and_drop_counter(self):

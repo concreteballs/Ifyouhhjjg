@@ -1,3 +1,5 @@
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,6 +62,38 @@ class PacketAuthenticationTests(unittest.TestCase):
                 runtime.send(Packet(self.source, self.destination, b"unsigned"))
             self.assertIsNone(database.get(self.destination))
             database.close()
+
+    def test_key_file_roundtrip_rotation_and_revocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key_file = Path(directory) / "packet-keys.json"
+            first_key = PacketAuthenticator.generate_key()
+            PacketAuthenticator.write_key_file(key_file, {"123": first_key})
+            loaded = PacketAuthenticator.from_file(key_file)
+            packet = Packet(self.source, self.destination, b"key-file")
+            packet.auth_tag = loaded.sign(packet)
+            self.assertTrue(loaded.verify(packet))
+
+            second_key = PacketAuthenticator.generate_key()
+            PacketAuthenticator.write_key_file(key_file, {"123": second_key})
+            rotated = PacketAuthenticator.from_file(key_file)
+            self.assertFalse(rotated.verify(packet))
+            packet.auth_tag = rotated.sign(packet)
+            self.assertTrue(rotated.verify(packet))
+
+            PacketAuthenticator.write_key_file(key_file, {"987": PacketAuthenticator.generate_key()})
+            revoked = PacketAuthenticator.from_file(key_file)
+            self.assertFalse(revoked.verify(packet))
+
+    def test_key_file_rejects_group_or_world_permissions(self):
+        if os.name != "posix":
+            self.skipTest("POSIX permission semantics are not available")
+        with tempfile.TemporaryDirectory() as directory:
+            key_file = Path(directory) / "packet-keys.json"
+            PacketAuthenticator.write_key_file(key_file, {"123": b"k" * 32})
+            os.chmod(key_file, 0o644)
+            with self.assertRaises(PermissionError):
+                PacketAuthenticator.from_file(key_file)
+            self.assertEqual(stat.S_IMODE(key_file.stat().st_mode), 0o644)
 
     def test_runtime_write_signs_packet_in_configured_mode(self):
         with tempfile.TemporaryDirectory() as directory:

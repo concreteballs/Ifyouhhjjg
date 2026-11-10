@@ -78,3 +78,8 @@ The geometry API is available as `database.spectral_field.geometry`:
 The field schema is additive and initialized automatically by `SpectralDatabase`. Existing endpoint data, packet receipts, and route-correction tables are not rewritten. The migration uses idempotent schema creation and seed inserts, and a compatibility upgrade converts earlier shade-level mix rows to root index-node rows without discarding their coefficients. Geometry migration version 3 copies existing X/Y positions into the dimension-independent coordinate table.
 
 This milestone only establishes the spectral database model. It does not implement network routing, a meta-router, the adder, physical photonic operations, or the future guard network.
+
+
+## Arbitrary-precision rational storage (migration versions 4–5)
+
+SQLite `INTEGER` is signed 64-bit and cannot represent denominators produced by indefinitely repeated bisection. Migration version 4 converts index interval endpoints, mix coefficients, and compatibility 2D positions to decimal `TEXT`; migration version 5 does the same for dimension-independent coordinate values. Python `Fraction` remains the arithmetic representation, with exact decimal-string conversion at the database boundary. This preserves values beyond 64-bit limits without changing shade IDs, index paths, or interval mathematics. Existing integer values are copied losslessly.

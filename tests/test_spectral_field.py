@@ -119,6 +119,24 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
             ],
         )
 
+    def test_mix_coefficients_allow_zero_and_reject_negative_or_zero_denominator(self):
+        component_id = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+        ).fetchone()[0]
+        self.field.set_mix_component("SC03-G00:", component_id, 0, 17)
+        self.assertEqual(
+            self.field.mix_components("SC03-G00:")[0]["numerator"], 0
+        )
+        self.assertEqual(
+            self.field.mix_components("SC03-G00:")[0]["denominator"], 1
+        )
+        with self.assertRaises(ValueError):
+            self.field.set_mix_component("SC03-G00:", component_id, -1, 2)
+        with self.assertRaises(ValueError):
+            self.field.set_mix_component("SC03-G00:", component_id, 1, 0)
+        with self.assertRaises(ValueError):
+            self.field.set_mix_component("SC03-G00:", component_id, True, 1)
+
     def test_recursive_child_is_a_distinct_mixable_index_value(self):
         component3 = self.db.connection.execute(
             "SELECT component_id FROM spectral_components WHERE cluster_id = 3"

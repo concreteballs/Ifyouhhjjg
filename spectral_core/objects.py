@@ -298,26 +298,52 @@ class SpectralObjectStore:
         """Rename an object without changing its stable identity or address."""
         object_id = self._required(object_id, "object_id")
         name = self._required(name, "name")
-        cursor = self.connection.execute(
-            "UPDATE spectral_objects SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
-            (name, object_id)
-        )
-        if cursor.rowcount != 1:
-            raise KeyError("object does not exist")
-        return self.get_object(object_id)
+        db = self.connection
+        owns = not db.in_transaction
+        db.execute("SAVEPOINT rename_spectral_object")
+        try:
+            cursor = db.execute(
+                "UPDATE spectral_objects SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
+                (name, object_id)
+            )
+            if cursor.rowcount != 1:
+                raise KeyError("object does not exist")
+            db.execute("RELEASE SAVEPOINT rename_spectral_object")
+            if owns:
+                db.commit()
+            return self.get_object(object_id)
+        except Exception:
+            db.execute("ROLLBACK TO SAVEPOINT rename_spectral_object")
+            db.execute("RELEASE SAVEPOINT rename_spectral_object")
+            if owns:
+                db.rollback()
+            raise
 
     def reorder_object(self, object_id, hierarchy_order):
         """Change sibling display order without changing the address."""
         object_id = self._required(object_id, "object_id")
         if isinstance(hierarchy_order, bool) or not isinstance(hierarchy_order, int):
             raise ValueError("hierarchy_order must be an integer")
-        cursor = self.connection.execute(
-            "UPDATE spectral_objects SET hierarchy_order = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
-            (hierarchy_order, object_id)
-        )
-        if cursor.rowcount != 1:
-            raise KeyError("object does not exist")
-        return self.get_object(object_id)
+        db = self.connection
+        owns = not db.in_transaction
+        db.execute("SAVEPOINT reorder_spectral_object")
+        try:
+            cursor = db.execute(
+                "UPDATE spectral_objects SET hierarchy_order = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
+                (hierarchy_order, object_id)
+            )
+            if cursor.rowcount != 1:
+                raise KeyError("object does not exist")
+            db.execute("RELEASE SAVEPOINT reorder_spectral_object")
+            if owns:
+                db.commit()
+            return self.get_object(object_id)
+        except Exception:
+            db.execute("ROLLBACK TO SAVEPOINT reorder_spectral_object")
+            db.execute("RELEASE SAVEPOINT reorder_spectral_object")
+            if owns:
+                db.rollback()
+            raise
 
     def reparent_object(self, object_id, new_parent_object_id=None, hierarchy_order=None):
         """Move an object subtree and version all affected addresses atomically."""
@@ -345,10 +371,22 @@ class SpectralObjectStore:
         new_order = current[1] if hierarchy_order is None else hierarchy_order
         if current[0] == new_parent_object_id:
             if current[1] != new_order:
-                db.execute(
-                    "UPDATE spectral_objects SET hierarchy_order = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
-                    (new_order, object_id)
-                )
+                owns = not db.in_transaction
+                db.execute("SAVEPOINT reorder_reparented_spectral_object")
+                try:
+                    db.execute(
+                        "UPDATE spectral_objects SET hierarchy_order = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
+                        (new_order, object_id)
+                    )
+                    db.execute("RELEASE SAVEPOINT reorder_reparented_spectral_object")
+                    if owns:
+                        db.commit()
+                except Exception:
+                    db.execute("ROLLBACK TO SAVEPOINT reorder_reparented_spectral_object")
+                    db.execute("RELEASE SAVEPOINT reorder_reparented_spectral_object")
+                    if owns:
+                        db.rollback()
+                    raise
             return self.get_object(object_id)
         owns = not db.in_transaction
         db.execute("SAVEPOINT reparent_spectral_object")

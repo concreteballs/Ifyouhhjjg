@@ -9,6 +9,7 @@ from typing import Optional, Union
 from .address import SpectralAddress
 from .geometry import SpectralGeometryStore
 from .spectral_field import SpectralFieldStore
+from .objects import SpectralObjectStore
 
 
 class SpectralDatabase:
@@ -78,6 +79,8 @@ class SpectralDatabase:
         self.spectral_field = SpectralFieldStore(self.connection)
         self.connection.commit()
         self.spectral_field.geometry = SpectralGeometryStore(self.connection)
+        self.connection.commit()
+        self.spectral_objects = SpectralObjectStore(self.connection, self.spectral_field.geometry)
         self.connection.commit()
         self._secure_sqlite_files()
 

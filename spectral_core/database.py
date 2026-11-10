@@ -29,7 +29,8 @@ class SpectralDatabase:
             finally:
                 os.close(fd)
             self.path = str(database_path)
-        self.connection = sqlite3.connect(self.path)
+        self.connection = sqlite3.connect(self.path, timeout=30.0)
+        self.connection.execute("PRAGMA busy_timeout = 30000")
         self.connection.execute(f"PRAGMA journal_mode = {journal_mode}")
         self._secure_sqlite_files()
         self.connection.execute("""
@@ -71,6 +72,8 @@ class SpectralDatabase:
         self.connection.execute(
             "CREATE INDEX IF NOT EXISTS applied_route_corrections_expiry ON applied_route_corrections(expires_at)"
         )
+        # Commit the base-store schema before acquiring the spectral migration lock.
+        self.connection.commit()
         self.spectral_field = SpectralFieldStore(self.connection)
         self.connection.commit()
         self._secure_sqlite_files()

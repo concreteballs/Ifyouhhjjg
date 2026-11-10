@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sqlite3
 import unittest
 
 from spectral_core import SpectralDatabase
@@ -50,7 +51,7 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only service clusters"):
             self.ext.bind_reserved_region_to_line("extra-reserve", 3)
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(sqlite3.IntegrityError):
             self.ext.bind_reserved_region_to_line("extra-reserve", 1)
 
         versions = [row[0] for row in self.db.connection.execute(

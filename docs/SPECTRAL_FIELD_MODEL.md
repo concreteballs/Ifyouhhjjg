@@ -47,7 +47,7 @@ The interval endpoints are stored as integer numerator/denominator pairs. Repeat
 
 ## Mixing
 
-Only the seven primary clusters create `spectral_components`. The three service clusters never become mixing components. Mix coefficients attach to an index-node ID, including any recursively created child, and are stored as reduced exact rational numbers, never floating-point values. The database does not impose that coefficients sum to one; normalization is not assumed by this schema.
+Only the seven primary clusters create `spectral_components`. Component IDs are database identities and are not assumed to equal cluster numbers. The three service clusters never become mixing components. Mix coefficients attach to an index-node ID, including any recursively created child, and are stored as reduced exact rational numbers, never floating-point values. The database does not impose that coefficients sum to one; normalization is not assumed by this schema.
 
 ## Coordinates and transformations
 
@@ -60,6 +60,6 @@ Coordinates are stored as exact rational pairs. Geometry transformations are ver
 
 ## Migration and compatibility
 
-The field schema is additive and initialized automatically by `SpectralDatabase`. Existing endpoint data, packet receipts, and route-correction tables are not rewritten. The migration uses `CREATE TABLE IF NOT EXISTS` and idempotent seed inserts.
+The field schema is additive and initialized automatically by `SpectralDatabase`. Existing endpoint data, packet receipts, and route-correction tables are not rewritten. The migration uses `CREATE TABLE IF NOT EXISTS`, idempotent seed inserts, and a compatibility upgrade that converts the earlier shade-level mix rows to root index-node rows without discarding their coefficients.
 
 This milestone only establishes the spectral database model. It does not implement network routing, a meta-router, the adder, physical photonic operations, or the future guard network.

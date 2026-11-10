@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 from .address import SpectralAddress
+from .geometry import SpectralGeometryStore
 from .spectral_field import SpectralFieldStore
 
 
@@ -75,6 +76,8 @@ class SpectralDatabase:
         # Commit the base-store schema before acquiring the spectral migration lock.
         self.connection.commit()
         self.spectral_field = SpectralFieldStore(self.connection)
+        self.connection.commit()
+        self.spectral_field.geometry = SpectralGeometryStore(self.connection)
         self.connection.commit()
         self._secure_sqlite_files()
 

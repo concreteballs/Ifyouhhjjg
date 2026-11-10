@@ -337,6 +337,37 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(values[1]["numerator"], -1)
         self.assertEqual(values[1]["denominator"], 2 ** 100)
 
+    def test_v5_migrates_existing_integer_coordinate_storage(self):
+        connection = self.db.connection
+        connection.execute(
+            "ALTER TABLE spectral_position_coordinates "
+            "RENAME TO spectral_position_coordinates_before_v5"
+        )
+        connection.execute("""CREATE TABLE spectral_position_coordinates (
+            shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+            coordinate_system_id TEXT NOT NULL, axis_order INTEGER NOT NULL,
+            numerator INTEGER NOT NULL, denominator INTEGER NOT NULL CHECK(denominator > 0),
+            PRIMARY KEY(shade_id, coordinate_system_id, axis_order),
+            FOREIGN KEY(coordinate_system_id, axis_order)
+                REFERENCES coordinate_axes(coordinate_system_id, axis_order))""")
+        connection.execute("""INSERT INTO spectral_position_coordinates
+            SELECT shade_id, coordinate_system_id, axis_order,
+                   CAST(numerator AS INTEGER), CAST(denominator AS INTEGER)
+            FROM spectral_position_coordinates_before_v5""")
+        connection.execute("DROP TABLE spectral_position_coordinates_before_v5")
+        connection.commit()
+        from spectral_core.geometry import SpectralGeometryStore
+        migrated = SpectralGeometryStore(connection)
+        self.assertEqual(migrated.get_coordinates("SC03-G04"), [
+            {"axis": "cluster-column", "numerator": 2, "denominator": 1},
+            {"axis": "gradient-row", "numerator": 4, "denominator": 1},
+        ])
+        info = {row[1]: row[2].upper()
+                for row in connection.execute("PRAGMA table_info(spectral_position_coordinates)")}
+        self.assertEqual(info["numerator"], "TEXT")
+        self.assertEqual(info["denominator"], "TEXT")
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+
     def test_coordinate_dimension_and_transform_shapes_are_validated(self):
         with self.assertRaises(ValueError):
             self.geometry.set_coordinates("SC03-G00", "spectral-grid-2d-v1", [1, 2, 3])

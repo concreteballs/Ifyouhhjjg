@@ -78,6 +78,30 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.field.split_index("SC03-G00")
 
+    def test_recursive_index_tree_metadata_and_partition_are_consistent(self):
+        root_id = "SC03-G00:"
+        children = self.field.split_index("SC03-G00")
+        rows = self.db.connection.execute(
+            """SELECT node_id, parent_node_id, branch, path, depth,
+                      lower_numerator, lower_denominator, upper_numerator, upper_denominator
+               FROM spectral_index_nodes WHERE parent_node_id = ? ORDER BY path""",
+            (root_id,),
+        ).fetchall()
+        self.assertEqual([row[0] for row in rows],
+                         ["SC03-G00:0", "SC03-G00:1"])
+        self.assertEqual([row[1] for row in rows], [root_id, root_id])
+        self.assertEqual([(row[2], row[3], row[4]) for row in rows],
+                         [("left", "0", 1), ("right", "1", 1)])
+        left_upper = Fraction(int(rows[0][7]), int(rows[0][8]))
+        right_lower = Fraction(int(rows[1][5]), int(rows[1][6]))
+        self.assertEqual(left_upper, right_lower)
+        self.assertEqual(Fraction(*children[0]["lower"]), Fraction(0, 1))
+        self.assertEqual(Fraction(*children[1]["upper"]), Fraction(1, 10))
+        grandchildren = self.field.split_index("SC03-G00", "1")
+        self.assertEqual([item["path"] for item in grandchildren], ["10", "11"])
+        self.assertTrue(all(item["depth"] == 2 for item in grandchildren))
+        self.assertEqual(grandchildren[0]["upper"], grandchildren[1]["lower"])
+
     def test_mixing_uses_only_seven_primary_components_and_exact_coefficients(self):
         component3 = self.db.connection.execute(
             "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
@@ -129,6 +153,21 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(len(self.field.mix_components("SC03-G00:")), 1)
         self.db.connection.rollback()
         self.assertEqual(self.field.mix_components("SC03-G00:"), [])
+
+    def test_all_initial_shades_map_to_their_zero_based_grid_coordinates(self):
+        rows = self.db.connection.execute(
+            """SELECT s.shade_id, s.grid_column, s.grid_row,
+                      p.numerator, p.denominator, p.axis_order
+               FROM spectral_shades s
+               JOIN spectral_position_coordinates p ON p.shade_id = s.shade_id
+               WHERE p.coordinate_system_id = 'spectral-grid-2d-v1'
+               ORDER BY s.grid_column, s.grid_row, p.axis_order"""
+        ).fetchall()
+        self.assertEqual(len(rows), 200)
+        for shade_id, column, row, numerator, denominator, axis in rows:
+            self.assertEqual(int(numerator), column - 1 if axis == 0 else row)
+            self.assertEqual(int(denominator), 1)
+            self.assertEqual(shade_id, f"SC{column:02d}-G{row:02d}")
 
     def test_gradient_rows_increase_from_top_to_bottom(self):
         top = self.geometry.get_coordinates("SC03-G00")
@@ -362,6 +401,33 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
             {"axis": "cluster-column", "numerator": 2, "denominator": 1},
             {"axis": "gradient-row", "numerator": 4, "denominator": 1},
         ])
+        info = {row[1]: row[2].upper()
+                for row in connection.execute("PRAGMA table_info(spectral_position_coordinates)")}
+        self.assertEqual(info["numerator"], "TEXT")
+        self.assertEqual(info["denominator"], "TEXT")
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_v5_repairs_mixed_rational_column_affinities(self):
+        connection = self.db.connection
+        connection.execute(
+            "ALTER TABLE spectral_position_coordinates "
+            "RENAME TO spectral_position_coordinates_before_mixed_v5"
+        )
+        connection.execute("""CREATE TABLE spectral_position_coordinates (
+            shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+            coordinate_system_id TEXT NOT NULL, axis_order INTEGER NOT NULL,
+            numerator TEXT NOT NULL, denominator INTEGER NOT NULL,
+            PRIMARY KEY(shade_id, coordinate_system_id, axis_order),
+            FOREIGN KEY(coordinate_system_id, axis_order)
+                REFERENCES coordinate_axes(coordinate_system_id, axis_order))""")
+        connection.execute("""INSERT INTO spectral_position_coordinates
+            SELECT shade_id, coordinate_system_id, axis_order, numerator,
+                   CAST(denominator AS INTEGER)
+            FROM spectral_position_coordinates_before_mixed_v5""")
+        connection.execute("DROP TABLE spectral_position_coordinates_before_mixed_v5")
+        connection.commit()
+        from spectral_core.geometry import SpectralGeometryStore
+        SpectralGeometryStore(connection)
         info = {row[1]: row[2].upper()
                 for row in connection.execute("PRAGMA table_info(spectral_position_coordinates)")}
         self.assertEqual(info["numerator"], "TEXT")

@@ -375,37 +375,42 @@ class SpectralExtensionStore:
         owns = not db.in_transaction
         if owns:
             db.execute("BEGIN IMMEDIATE")
-        snapshot = self.get_hierarchy_snapshot(snapshot_id)
-        verification = self.verify_hierarchy_snapshot(snapshot_id)
-        expected = {row[0]: row[1:] for row in self.connection.execute(
-            """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
-                      index_node_id, address_value
-               FROM spectral_hierarchy_snapshot_objects WHERE snapshot_id = ?""", (snapshot_id,))}
-        if snapshot["root_object_id"] is None:
-            live_rows = self._snapshot_rows()
-        else:
-            try:
-                live_rows = self._snapshot_rows(snapshot["root_object_id"])
-            except KeyError:
-                live_rows = []
-        actual = {row[0]: row[1:] for row in live_rows}
-        added = sorted(set(actual) - set(expected))
-        missing = sorted(set(expected) - set(actual))
-        changed = []
-        fields = ("object_type", "name", "parent_object_id", "hierarchy_order",
-                  "index_node_id", "address_value")
-        for object_id in sorted(set(expected) & set(actual)):
-            if expected[object_id] != actual[object_id]:
-                changed.append({"object_id": object_id,
-                                "fields": [fields[i] for i, pair in enumerate(zip(expected[object_id], actual[object_id]))
-                                           if pair[0] != pair[1]]})
-        report = {"snapshot_id": snapshot_id, "added": added, "missing": missing,
-                  "changed": changed, "snapshot_valid": verification["is_valid"],
-                  "is_consistent": verification["is_valid"] and not (added or missing or changed)}
-        self._record_event(snapshot_id, "comparison", report)
-        if owns:
-            db.commit()
-        return report
+        try:
+            snapshot = self.get_hierarchy_snapshot(snapshot_id)
+            verification = self.verify_hierarchy_snapshot(snapshot_id)
+            expected = {row[0]: row[1:] for row in self.connection.execute(
+                """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
+                          index_node_id, address_value
+                   FROM spectral_hierarchy_snapshot_objects WHERE snapshot_id = ?""", (snapshot_id,))}
+            if snapshot["root_object_id"] is None:
+                live_rows = self._snapshot_rows()
+            else:
+                try:
+                    live_rows = self._snapshot_rows(snapshot["root_object_id"])
+                except KeyError:
+                    live_rows = []
+            actual = {row[0]: row[1:] for row in live_rows}
+            added = sorted(set(actual) - set(expected))
+            missing = sorted(set(expected) - set(actual))
+            changed = []
+            fields = ("object_type", "name", "parent_object_id", "hierarchy_order",
+                      "index_node_id", "address_value")
+            for object_id in sorted(set(expected) & set(actual)):
+                if expected[object_id] != actual[object_id]:
+                    changed.append({"object_id": object_id,
+                                    "fields": [fields[i] for i, pair in enumerate(zip(expected[object_id], actual[object_id]))
+                                               if pair[0] != pair[1]]})
+            report = {"snapshot_id": snapshot_id, "added": added, "missing": missing,
+                      "changed": changed, "snapshot_valid": verification["is_valid"],
+                      "is_consistent": verification["is_valid"] and not (added or missing or changed)}
+            self._record_event(snapshot_id, "comparison", report)
+            if owns:
+                db.commit()
+            return report
+        except Exception:
+            if owns:
+                db.rollback()
+            raise
 
     def _record_event(self, snapshot_id, event_type, details):
         self.connection.execute(

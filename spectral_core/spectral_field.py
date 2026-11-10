@@ -299,7 +299,7 @@ class SpectralFieldStore:
             (index_node_id,),
         ).fetchone()
         if row is None:
-            raise KeyError("shade does not exist")
+            raise KeyError("spectral index node does not exist")
         if not row[0]:
             raise PermissionError("service clusters cannot participate in mixing")
         component = self.connection.execute(

@@ -83,3 +83,19 @@ This milestone only establishes the spectral database model. It does not impleme
 ## Arbitrary-precision rational storage (migration versions 4–5)
 
 SQLite `INTEGER` is signed 64-bit and cannot represent denominators produced by indefinitely repeated bisection. Migration version 4 converts index interval endpoints, mix coefficients, and compatibility 2D positions to decimal `TEXT`; migration version 5 does the same for dimension-independent coordinate values. Python `Fraction` remains the arithmetic representation, with exact decimal-string conversion at the database boundary. This preserves values beyond 64-bit limits without changing shade IDs, index paths, or interval mathematics. Existing integer values are copied losslessly.
+
+
+## Hierarchical objects and spectral addresses (migration version 6)
+
+The object layer is separate from network endpoint identifiers and from the recursive spectral-index tree. It adds:
+
+- `spectral_objects`: stable object identity, type, name, parent, sibling order, and the spectral index node assigned to that hierarchy level.
+- `spectral_object_addresses`: versioned active/retired snapshots of each object's complete address.
+- `spectral_object_address_segments`: ordered ancestry components captured in each address version.
+- `spectral_object_position_coordinates`: exact N-dimensional object positions, reusing existing coordinate systems and axes.
+
+Each address segment is derived from the selected index node and its existing shade/cluster metadata. Its printable form is `B{ITU-band}-G{gradient-row}`, with `~{binary-index-path}` appended for recursively subdivided nodes. For example, `B05-G00~01` means ITU band 5, gradient row 0, and binary subdivision path 01. Complete object addresses join ancestry components with `/`. The three service-reserved clusters are excluded from ordinary object addresses.
+
+An object's own index node is stored separately from its object ID. Address snapshots record the entire root-to-object chain, so resolving a terminal address returns the full object hierarchy and verifies that each segment still follows the parent relation. Address uniqueness is enforced. A duplicate active address is rejected rather than silently shared.
+
+Coordinates use the same exact rational rules as shade coordinates: numerator and denominator are decimal TEXT, and float inputs are rejected. Object positions do not alter object IDs or spectral addresses. This milestone does not implement routing, meta-routing, the adder, or the guard network.

@@ -47,7 +47,7 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(grandchildren[1]["upper"], (1, 20))
 
     def test_recursive_index_exceeds_sqlite_integer_limit_without_precision_loss(self):
-        path = "0"
+        path = ""
         for _ in range(70):
             self.field.split_index("SC03-G00", path)
             path += "0"
@@ -301,6 +301,18 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         transformed = self.geometry.apply_transform("SC03-G04", "3d-affine")
         self.assertEqual([(v["numerator"], v["denominator"]) for v in transformed["coordinates"]],
                          [(2, 1), (9, 1), (2, 1)])
+
+    def test_geometry_coordinates_support_values_beyond_sqlite_integer_limit(self):
+        self.geometry.create_coordinate_system(
+            "huge-rational-space", "Huge rational coordinates", ["x", "y"], "unit"
+        )
+        huge = Fraction(1, 2 ** 100)
+        self.geometry.set_coordinates("SC03-G00", "huge-rational-space", [huge, -huge])
+        values = self.geometry.get_coordinates("SC03-G00", "huge-rational-space")
+        self.assertEqual(values[0]["numerator"], 1)
+        self.assertEqual(values[0]["denominator"], 2 ** 100)
+        self.assertEqual(values[1]["numerator"], -1)
+        self.assertEqual(values[1]["denominator"], 2 ** 100)
 
     def test_coordinate_dimension_and_transform_shapes_are_validated(self):
         with self.assertRaises(ValueError):

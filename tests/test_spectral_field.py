@@ -57,7 +57,7 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
             ("SC03-G00", path),
         ).fetchone()
         self.assertTrue(all(isinstance(value, str) for value in leaf))
-        self.assertGreater(len(leaf[1]), 19)
+        self.assertGreater(len(leaf[3]), 19)
         lower = Fraction(int(leaf[0]), int(leaf[1]))
         upper = Fraction(int(leaf[2]), int(leaf[3]))
         self.assertEqual(upper - lower, Fraction(1, 10 * (2 ** 70)))

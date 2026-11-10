@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 from .address import SpectralAddress
+from .spectral_field import SpectralFieldStore
 
 
 class SpectralDatabase:
@@ -70,6 +71,7 @@ class SpectralDatabase:
         self.connection.execute(
             "CREATE INDEX IF NOT EXISTS applied_route_corrections_expiry ON applied_route_corrections(expires_at)"
         )
+        self.spectral_field = SpectralFieldStore(self.connection)
         self.connection.commit()
         self._secure_sqlite_files()
 

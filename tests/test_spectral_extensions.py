@@ -116,6 +116,20 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
         self.assertEqual(report["added"], ["nested"])
         self.assertFalse(report["is_consistent"])
 
+    def test_snapshot_detects_objects_without_active_addresses(self):
+        self.ext.create_hierarchy_snapshot("address-integrity-1")
+        self.db.connection.execute(
+            "DELETE FROM spectral_object_addresses WHERE object_id = ? AND status = 'active'",
+            ("child",)
+        )
+        self.db.connection.commit()
+
+        report = self.ext.compare_hierarchy_snapshot("address-integrity-1")
+        changed = next(item for item in report["changed"] if item["object_id"] == "child")
+        self.assertIn("address_value", changed["fields"])
+        with self.assertRaisesRegex(RuntimeError, "no active spectral address"):
+            self.ext.create_hierarchy_snapshot("invalid-address-snapshot")
+
     def test_snapshot_checksum_is_verified_and_corruption_blocks_recovery(self):
         self.ext.create_hierarchy_snapshot("checksum-1")
         valid = self.ext.verify_hierarchy_snapshot("checksum-1")

@@ -138,6 +138,78 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.field.set_mix_component("SC03-G00:", 10, 1, 2)
 
+    def test_spectral_migration_preserves_endpoint_receipt_and_correction_tables(self):
+        connection = sqlite3.connect(":memory:")
+        connection.execute("""CREATE TABLE endpoint_data (
+            spectral_id TEXT PRIMARY KEY, payload BLOB NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        connection.execute("""CREATE TABLE packet_receipts (
+            packet_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, expires_at INTEGER NOT NULL)""")
+        connection.execute("""CREATE TABLE route_correction_nonces (
+            nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)""")
+        connection.execute("""CREATE TABLE applied_route_corrections (
+            previous_router TEXT NOT NULL, destination_id TEXT NOT NULL,
+            rejected_next_hop TEXT NOT NULL, corrected_next_hop TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            PRIMARY KEY(previous_router, destination_id))""")
+        connection.execute("INSERT INTO endpoint_data VALUES ('endpoint-1', X'616263', 'before')")
+        connection.execute("INSERT INTO packet_receipts VALUES ('packet-1', 'source-1', 500)")
+        connection.execute("INSERT INTO route_correction_nonces VALUES ('nonce-1', 600)")
+        connection.execute(
+            "INSERT INTO applied_route_corrections VALUES "
+            "('router-a', 'destination-a', 'router-b', 'router-c', 700)"
+        )
+        connection.commit()
+        from spectral_core.spectral_field import SpectralFieldStore
+        from spectral_core.geometry import SpectralGeometryStore
+        SpectralFieldStore(connection)
+        SpectralGeometryStore(connection)
+        self.assertEqual(connection.execute(
+            "SELECT spectral_id, payload, updated_at FROM endpoint_data"
+        ).fetchall(), [("endpoint-1", b"abc", "before")])
+        self.assertEqual(connection.execute(
+            "SELECT * FROM packet_receipts"
+        ).fetchall(), [("packet-1", "source-1", 500)])
+        self.assertEqual(connection.execute(
+            "SELECT * FROM route_correction_nonces"
+        ).fetchall(), [("nonce-1", 600)])
+        self.assertEqual(connection.execute(
+            "SELECT * FROM applied_route_corrections"
+        ).fetchall(), [("router-a", "destination-a", "router-b", "router-c", 700)])
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+        connection.close()
+
+    def test_spectral_migration_rolls_back_when_foreign_key_check_fails(self):
+        connection = self.db.connection
+        component_id = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+        ).fetchone()[0]
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute(
+            """INSERT INTO spectral_mix_components
+               (index_node_id, component_id, coefficient_numerator, coefficient_denominator)
+               VALUES ('SC03-G00:', ?, '1', '2')""",
+            (component_id + 10000,),
+        )
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = ON")
+        from spectral_core.spectral_field import SpectralFieldStore
+        with self.assertRaises(RuntimeError):
+            SpectralFieldStore(connection)
+        self.assertEqual(connection.in_transaction, False)
+        self.assertEqual(connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+        self.assertEqual(connection.execute(
+            "SELECT COUNT(*) FROM spectral_mix_components WHERE component_id = ?",
+            (component_id + 10000,),
+        ).fetchone()[0], 1)
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute(
+            "DELETE FROM spectral_mix_components WHERE component_id = ?",
+            (component_id + 10000,),
+        )
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = ON")
+
     def test_existing_endpoint_store_remains_available_after_migration(self):
         from spectral_core import SpectralAddress
         address = SpectralAddress("123")

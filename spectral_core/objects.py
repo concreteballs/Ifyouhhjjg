@@ -459,6 +459,10 @@ class SpectralObjectStore:
         for previous, current in zip(segments, segments[1:]):
             if current[6] != previous[1]:
                 raise RuntimeError("address segments do not match object parent hierarchy")
+        snapshot_chain = [(segment[1], None, segment[4]) for segment in segments]
+        reconstructed_address = self._compose_address(snapshot_chain)
+        if reconstructed_address != address_value:
+            raise RuntimeError("saved address does not match its hierarchy segment snapshot")
         return {
             "address": address_value, "object_id": row[1], "version": row[2],
             "hierarchy": [

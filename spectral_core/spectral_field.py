@@ -45,9 +45,11 @@ class SpectralFieldStore:
 
     def _migrate_and_seed(self):
         db = self.connection
-        db.execute("PRAGMA foreign_keys = ON")
-        db.execute("PRAGMA busy_timeout = 30000")
         owns_transaction = not db.in_transaction
+        if owns_transaction:
+            db.execute("PRAGMA foreign_keys = OFF")
+            db.execute("PRAGMA legacy_alter_table = ON")
+        db.execute("PRAGMA busy_timeout = 30000")
         if owns_transaction:
             # Acquire the write reservation before reading schema state. This avoids
             # deferred-transaction lock-up when several connections initialize at once.
@@ -122,8 +124,8 @@ class SpectralFieldStore:
                 """CREATE TABLE IF NOT EXISTS spectral_mix_components (
                     index_node_id TEXT NOT NULL REFERENCES spectral_index_nodes(node_id),
                     component_id INTEGER NOT NULL REFERENCES spectral_components(component_id),
-                    coefficient_numerator INTEGER NOT NULL CHECK(coefficient_numerator >= 0),
-                    coefficient_denominator INTEGER NOT NULL CHECK(coefficient_denominator > 0),
+                    coefficient_numerator TEXT NOT NULL,
+                    coefficient_denominator TEXT NOT NULL,
                     PRIMARY KEY(index_node_id, component_id)
                 )""",
                 """CREATE TABLE IF NOT EXISTS coordinate_systems (
@@ -142,10 +144,10 @@ class SpectralFieldStore:
                 """CREATE TABLE IF NOT EXISTS spectral_positions (
                     shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
                     coordinate_system_id TEXT NOT NULL REFERENCES coordinate_systems(coordinate_system_id),
-                    x_numerator INTEGER NOT NULL,
-                    x_denominator INTEGER NOT NULL CHECK(x_denominator > 0),
-                    y_numerator INTEGER NOT NULL,
-                    y_denominator INTEGER NOT NULL CHECK(y_denominator > 0),
+                    x_numerator TEXT NOT NULL,
+                    x_denominator TEXT NOT NULL,
+                    y_numerator TEXT NOT NULL,
+                    y_denominator TEXT NOT NULL,
                     PRIMARY KEY(shade_id, coordinate_system_id)
                 )""",
                 """CREATE TABLE IF NOT EXISTS geometry_transforms (
@@ -162,10 +164,10 @@ class SpectralFieldStore:
                     branch TEXT NOT NULL CHECK(branch IN ('root', 'left', 'right')),
                     path TEXT NOT NULL,
                     depth INTEGER NOT NULL CHECK(depth >= 0),
-                    lower_numerator INTEGER NOT NULL,
-                    lower_denominator INTEGER NOT NULL CHECK(lower_denominator > 0),
-                    upper_numerator INTEGER NOT NULL,
-                    upper_denominator INTEGER NOT NULL CHECK(upper_denominator > 0),
+                    lower_numerator TEXT NOT NULL,
+                    lower_denominator TEXT NOT NULL,
+                    upper_numerator TEXT NOT NULL,
+                    upper_denominator TEXT NOT NULL,
                     UNIQUE(shade_id, path)
                 )""",
                 "CREATE INDEX IF NOT EXISTS spectral_index_nodes_parent ON spectral_index_nodes(parent_node_id)",
@@ -252,15 +254,79 @@ class SpectralFieldStore:
                          ON node.shade_id = old.shade_id AND node.path = ''"""
                 )
                 db.execute("DROP TABLE spectral_mix_components_legacy_v1")
+
+            # Version 4: SQLite INTEGER is signed 64-bit; rational values use decimal TEXT.
+            rational_tables = (
+                ("spectral_index_nodes", {"lower_numerator", "lower_denominator", "upper_numerator", "upper_denominator"}),
+                ("spectral_mix_components", {"coefficient_numerator", "coefficient_denominator"}),
+                ("spectral_positions", {"x_numerator", "x_denominator", "y_numerator", "y_denominator"}),
+            )
+            needs_exact_upgrade = False
+            for table_name, columns_needed in rational_tables:
+                info = {row[1]: row[2].upper() for row in db.execute(f"PRAGMA table_info({table_name})")}
+                if info and any(info.get(column) != "TEXT" for column in columns_needed):
+                    needs_exact_upgrade = True
+            if needs_exact_upgrade:
+                if not owns_transaction:
+                    raise RuntimeError("exact rational storage migration requires its own transaction")
+                db.execute("DROP INDEX IF EXISTS spectral_index_nodes_parent")
+                db.execute("ALTER TABLE spectral_mix_components RENAME TO spectral_mix_components_legacy_exact_v4")
+                db.execute("ALTER TABLE spectral_index_nodes RENAME TO spectral_index_nodes_legacy_exact_v4")
+                db.execute("ALTER TABLE spectral_positions RENAME TO spectral_positions_legacy_exact_v4")
+                db.execute("""CREATE TABLE spectral_index_nodes (
+                    node_id TEXT PRIMARY KEY, shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+                    parent_node_id TEXT REFERENCES spectral_index_nodes(node_id),
+                    branch TEXT NOT NULL CHECK(branch IN ('root', 'left', 'right')),
+                    path TEXT NOT NULL, depth INTEGER NOT NULL CHECK(depth >= 0),
+                    lower_numerator TEXT NOT NULL, lower_denominator TEXT NOT NULL,
+                    upper_numerator TEXT NOT NULL, upper_denominator TEXT NOT NULL,
+                    UNIQUE(shade_id, path))""")
+                db.execute("""INSERT INTO spectral_index_nodes
+                    SELECT node_id, shade_id, parent_node_id, branch, path, depth,
+                           CAST(lower_numerator AS TEXT), CAST(lower_denominator AS TEXT),
+                           CAST(upper_numerator AS TEXT), CAST(upper_denominator AS TEXT)
+                    FROM spectral_index_nodes_legacy_exact_v4""")
+                db.execute("""CREATE TABLE spectral_mix_components (
+                    index_node_id TEXT NOT NULL REFERENCES spectral_index_nodes(node_id),
+                    component_id INTEGER NOT NULL REFERENCES spectral_components(component_id),
+                    coefficient_numerator TEXT NOT NULL, coefficient_denominator TEXT NOT NULL,
+                    PRIMARY KEY(index_node_id, component_id))""")
+                db.execute("""INSERT INTO spectral_mix_components
+                    SELECT index_node_id, component_id, CAST(coefficient_numerator AS TEXT),
+                           CAST(coefficient_denominator AS TEXT)
+                    FROM spectral_mix_components_legacy_exact_v4""")
+                db.execute("""CREATE TABLE spectral_positions (
+                    shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+                    coordinate_system_id TEXT NOT NULL REFERENCES coordinate_systems(coordinate_system_id),
+                    x_numerator TEXT NOT NULL, x_denominator TEXT NOT NULL,
+                    y_numerator TEXT NOT NULL, y_denominator TEXT NOT NULL,
+                    PRIMARY KEY(shade_id, coordinate_system_id))""")
+                db.execute("""INSERT INTO spectral_positions
+                    SELECT shade_id, coordinate_system_id, CAST(x_numerator AS TEXT),
+                           CAST(x_denominator AS TEXT), CAST(y_numerator AS TEXT),
+                           CAST(y_denominator AS TEXT) FROM spectral_positions_legacy_exact_v4""")
+                db.execute("DROP TABLE spectral_mix_components_legacy_exact_v4")
+                db.execute("DROP TABLE spectral_index_nodes_legacy_exact_v4")
+                db.execute("DROP TABLE spectral_positions_legacy_exact_v4")
+                db.execute("CREATE INDEX spectral_index_nodes_parent ON spectral_index_nodes(parent_node_id)")
+            db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (4)")
+
             db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (1), (2)")
             db.execute("RELEASE SAVEPOINT spectral_field_v1")
             if owns_transaction:
                 db.commit()
+                db.execute("PRAGMA legacy_alter_table = OFF")
+                db.execute("PRAGMA foreign_keys = ON")
+                violations = db.execute("PRAGMA foreign_key_check").fetchall()
+                if violations:
+                    raise RuntimeError(f"foreign-key violations after spectral migration: {violations[:5]}")
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT spectral_field_v1")
             db.execute("RELEASE SAVEPOINT spectral_field_v1")
             if owns_transaction:
                 db.rollback()
+                db.execute("PRAGMA legacy_alter_table = OFF")
+                db.execute("PRAGMA foreign_keys = ON")
             raise
 
     def clusters(self) -> List[Dict]:
@@ -298,8 +364,8 @@ class SpectralFieldStore:
             ).fetchone()
             if existing:
                 raise ValueError("index node has already been split")
-            lower = Fraction(parent[2], parent[3])
-            upper = Fraction(parent[4], parent[5])
+            lower = Fraction(int(parent[2]), int(parent[3]))
+            upper = Fraction(int(parent[4]), int(parent[5]))
             midpoint = (lower + upper) / 2
             children = (
                 ("left", path + "0", lower, midpoint),
@@ -314,7 +380,8 @@ class SpectralFieldStore:
                         lower_numerator, lower_denominator, upper_numerator, upper_denominator)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (node_id, shade_id, parent[0], branch, child_path, parent[1] + 1,
-                     start.numerator, start.denominator, end.numerator, end.denominator),
+                     str(start.numerator), str(start.denominator),
+                     str(end.numerator), str(end.denominator)),
                 )
                 result.append({
                     "node_id": node_id, "shade_id": shade_id, "path": child_path,
@@ -369,7 +436,7 @@ class SpectralFieldStore:
                    ON CONFLICT(index_node_id, component_id) DO UPDATE SET
                      coefficient_numerator = excluded.coefficient_numerator,
                      coefficient_denominator = excluded.coefficient_denominator""",
-                (index_node_id, component_id, fraction.numerator, fraction.denominator),
+                (index_node_id, component_id, str(fraction.numerator), str(fraction.denominator)),
             )
             db.execute("RELEASE SAVEPOINT set_spectral_mix_component")
             if owns_transaction:
@@ -392,7 +459,7 @@ class SpectralFieldStore:
         ).fetchall()
         return [
             {"component_id": row[0], "component_key": row[1],
-             "numerator": row[2], "denominator": row[3]}
+             "numerator": int(row[2]), "denominator": int(row[3])}
             for row in rows
         ]
 

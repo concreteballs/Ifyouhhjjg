@@ -66,11 +66,9 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
         self.assertIn("name", report["changed"][0]["fields"])
 
         recovered = self.ext.restore_hierarchy_snapshot("baseline-1")
-        self.assertTrue(any(
-            item["object_id"] == "child" and "name" in item["fields"]
-            for item in recovered["changed"]
-        ))
+        self.assertFalse(any(item["object_id"] == "child" for item in recovered["changed"]))
         self.assertEqual(self.objects.get_object("child")["name"], "Child")
+        self.assertEqual(recovered["added"], ["later"])
         self.assertEqual(self.objects.get_object("later")["name"], "Later addition")
         events = self.ext.integrity_events("baseline-1")
         self.assertIn("recovery_completed", [event["event_type"] for event in events])

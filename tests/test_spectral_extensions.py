@@ -55,6 +55,33 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
         self.assertEqual(interspace["target_coordinate_system_id"], "abstract-space-v1")
         self.assertEqual(self.ext.get_interspace_link("space-link-1")["link_id"], "space-link-1")
 
+    def test_extension_writes_respect_caller_owned_transactions(self):
+        connection = self.db.connection
+        connection.execute("BEGIN")
+        self.ext.create_reserved_region("rolled-back-region", "reserved", "Temporary")
+        self.ext.create_semantic_link("rolled-back-link", "root", "child", "related")
+        connection.rollback()
+
+        self.assertIsNone(connection.execute(
+            "SELECT 1 FROM spectral_reserved_regions WHERE region_id = ?",
+            ("rolled-back-region",)
+        ).fetchone())
+        self.assertIsNone(connection.execute(
+            "SELECT 1 FROM spectral_semantic_links WHERE link_id = ?",
+            ("rolled-back-link",)
+        ).fetchone())
+
+        self.ext.create_reserved_region("committed-region", "reserved", "Committed")
+        self.assertFalse(connection.in_transaction)
+        self.ext.create_hierarchy_snapshot("transaction-snapshot")
+        self.ext.compare_hierarchy_snapshot("transaction-snapshot")
+        self.assertFalse(connection.in_transaction)
+
+        self.objects.rename_object("child", "Changed")
+        self.ext.restore_hierarchy_snapshot("transaction-snapshot")
+        self.assertEqual(self.objects.get_object("child")["name"], "Child")
+        self.assertFalse(connection.in_transaction)
+
     def test_snapshot_detects_changes_and_recovery_restores_captured_state(self):
         self.ext.create_hierarchy_snapshot("baseline-1")
         self.objects.rename_object("child", "Changed child")

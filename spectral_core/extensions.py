@@ -150,7 +150,6 @@ class SpectralExtensionStore:
                VALUES (?, ?, ?, ?, ?)""",
             (region_id, region_type, name, description, self._json(metadata)))
         if owns:
-            if owns:
             self.connection.commit()
         return self.get_reserved_region(region_id)
 
@@ -172,7 +171,8 @@ class SpectralExtensionStore:
                WHERE region_id = ?""", (status, region_id))
         if cur.rowcount != 1:
             raise KeyError("reserved region does not exist")
-        self.connection.commit()
+        if owns:
+            self.connection.commit()
         return self.get_reserved_region(region_id)
 
     def create_extension_point(self, point_id, point_type, name, region_id=None,
@@ -191,7 +191,6 @@ class SpectralExtensionStore:
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (point_id, region_id, point_type, name, object_id, coordinate_system_id, self._json(metadata)))
         if owns:
-            if owns:
             self.connection.commit()
         return self.get_extension_point(point_id)
 
@@ -215,7 +214,8 @@ class SpectralExtensionStore:
                WHERE point_id = ?""", (status, point_id))
         if cur.rowcount != 1:
             raise KeyError("extension point does not exist")
-        self.connection.commit()
+        if owns:
+            self.connection.commit()
         return self.get_extension_point(point_id)
 
     def create_semantic_link(self, link_id, source_object_id, target_object_id,

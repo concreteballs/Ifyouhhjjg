@@ -312,14 +312,17 @@ class SpectralFieldStore:
             db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (4)")
 
             db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (1), (2)")
+            if owns_transaction:
+                # Validate while the migration transaction is still open so a
+                # failed integrity check can roll the schema and data back.
+                violations = db.execute("PRAGMA foreign_key_check").fetchall()
+                if violations:
+                    raise RuntimeError(f"foreign-key violations after spectral migration: {violations[:5]}")
             db.execute("RELEASE SAVEPOINT spectral_field_v1")
             if owns_transaction:
                 db.commit()
                 db.execute("PRAGMA legacy_alter_table = OFF")
                 db.execute("PRAGMA foreign_keys = ON")
-                violations = db.execute("PRAGMA foreign_key_check").fetchall()
-                if violations:
-                    raise RuntimeError(f"foreign-key violations after spectral migration: {violations[:5]}")
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT spectral_field_v1")
             db.execute("RELEASE SAVEPOINT spectral_field_v1")

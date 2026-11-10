@@ -38,6 +38,26 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
             "planned"
         )
 
+    def test_service_clusters_are_reserved_as_complete_spectral_lines(self):
+        lines = self.ext.reserved_lines()
+        self.assertEqual([line["cluster_order"] for line in lines], [1, 2, 10])
+        self.assertTrue(all(line["coverage"] == "full_line" for line in lines))
+        self.assertTrue(all(line["shade_count"] == 10 for line in lines))
+        self.assertEqual(self.ext.get_reserved_line(1)["region_id"], "service-line-01")
+        self.assertEqual(self.ext.get_reserved_line(10)["shade_count"], 10)
+
+        self.ext.create_reserved_region("extra-reserve", "reserved", "Extra reserve")
+        with self.assertRaisesRegex(ValueError, "only service clusters"):
+            self.ext.bind_reserved_region_to_line("extra-reserve", 3)
+
+        with self.assertRaises(Exception):
+            self.ext.bind_reserved_region_to_line("extra-reserve", 1)
+
+        versions = [row[0] for row in self.db.connection.execute(
+            "SELECT version FROM spectral_schema_migrations ORDER BY version"
+        )]
+        self.assertIn(10, versions)
+
     def test_semantic_and_interspace_links_are_persisted_and_searchable(self):
         semantic = self.ext.create_semantic_link(
             "meaning-1", "root", "child", "contains-concept",

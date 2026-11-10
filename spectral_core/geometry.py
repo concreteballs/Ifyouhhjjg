@@ -2,7 +2,7 @@
 from fractions import Fraction
 import json
 import sqlite3
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 class SpectralGeometryStore:
@@ -80,6 +80,7 @@ class SpectralGeometryStore:
                 or len(set(axes)) != len(axes)):
             raise ValueError("axes must contain at least two unique non-empty names")
         db = self.connection
+        owns = not db.in_transaction
         db.execute("SAVEPOINT create_coordinate_system")
         try:
             db.execute("""INSERT INTO coordinate_systems
@@ -90,9 +91,13 @@ class SpectralGeometryStore:
                 (coordinate_system_id, axis_order, axis_name) VALUES (?, ?, ?)""",
                 [(coordinate_system_id, i, axis) for i, axis in enumerate(axes)])
             db.execute("RELEASE SAVEPOINT create_coordinate_system")
+            if owns:
+                db.commit()
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT create_coordinate_system")
             db.execute("RELEASE SAVEPOINT create_coordinate_system")
+            if owns:
+                db.rollback()
             raise
 
     def coordinate_system(self, coordinate_system_id: str):
@@ -120,6 +125,7 @@ class SpectralGeometryStore:
             raise ValueError("coordinate count must match coordinate-system dimensions")
         fractions = [self._fraction(value) for value in values]
         db = self.connection
+        owns = not db.in_transaction
         db.execute("SAVEPOINT set_spectral_coordinates")
         try:
             for order, value in enumerate(fractions):
@@ -138,9 +144,13 @@ class SpectralGeometryStore:
                      fractions[1].numerator, fractions[1].denominator,
                      shade_id, coordinate_system_id))
             db.execute("RELEASE SAVEPOINT set_spectral_coordinates")
+            if owns:
+                db.commit()
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT set_spectral_coordinates")
             db.execute("RELEASE SAVEPOINT set_spectral_coordinates")
+            if owns:
+                db.rollback()
             raise
 
     def get_coordinates(self, shade_id: str, coordinate_system_id: str = DEFAULT_SYSTEM):
@@ -171,11 +181,24 @@ class SpectralGeometryStore:
         b = [self._fraction(v) for v in offset]
         payload = {"matrix": [[[v.numerator, v.denominator] for v in row] for row in m],
                    "offset": [[v.numerator, v.denominator] for v in b]}
-        self.connection.execute("""INSERT INTO geometry_transforms
-            (transform_id, coordinate_system_id, transform_type, parameters_json)
-            VALUES (?, ?, 'affine-rational', ?)""",
-            (transform_id, coordinate_system_id,
-             json.dumps(payload, separators=(",", ":"), sort_keys=True)))
+        db = self.connection
+        owns = not db.in_transaction
+        db.execute("SAVEPOINT create_affine_transform")
+        try:
+            db.execute("""INSERT INTO geometry_transforms
+                (transform_id, coordinate_system_id, transform_type, parameters_json)
+                VALUES (?, ?, 'affine-rational', ?)""",
+                (transform_id, coordinate_system_id,
+                 json.dumps(payload, separators=(",", ":"), sort_keys=True)))
+            db.execute("RELEASE SAVEPOINT create_affine_transform")
+            if owns:
+                db.commit()
+        except Exception:
+            db.execute("ROLLBACK TO SAVEPOINT create_affine_transform")
+            db.execute("RELEASE SAVEPOINT create_affine_transform")
+            if owns:
+                db.rollback()
+            raise
 
     def create_scale_transform(self, transform_id: str, coordinate_system_id: str,
                                factors: Sequence, offset: Sequence = None):

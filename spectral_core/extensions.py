@@ -354,21 +354,33 @@ class SpectralExtensionStore:
         return dict(zip(("snapshot_id", "root_object_id", "object_count", "digest_sha256", "created_at"), row))
 
     def verify_hierarchy_snapshot(self, snapshot_id):
-        snapshot = self.get_hierarchy_snapshot(snapshot_id)
-        rows = self.connection.execute(
-            """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
-                      index_node_id, address_value
-               FROM spectral_hierarchy_snapshot_objects
-               WHERE snapshot_id = ? ORDER BY object_id""", (snapshot_id,)).fetchall()
-        serial = [list(row) for row in rows]
-        actual_digest = hashlib.sha256(json.dumps(
-            serial, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
-        actual_count = len(rows)
-        valid = (actual_count == snapshot["object_count"]
-                 and actual_digest == snapshot["digest_sha256"])
-        return {"snapshot_id": snapshot_id, "is_valid": valid,
-                "expected_count": snapshot["object_count"], "actual_count": actual_count,
-                "expected_digest": snapshot["digest_sha256"], "actual_digest": actual_digest}
+        db = self.connection
+        owns = not db.in_transaction
+        if owns:
+            db.execute("BEGIN IMMEDIATE")
+        try:
+            snapshot = self.get_hierarchy_snapshot(snapshot_id)
+            rows = db.execute(
+                """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
+                          index_node_id, address_value
+                   FROM spectral_hierarchy_snapshot_objects
+                   WHERE snapshot_id = ? ORDER BY object_id""", (snapshot_id,)).fetchall()
+            serial = [list(row) for row in rows]
+            actual_digest = hashlib.sha256(json.dumps(
+                serial, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+            actual_count = len(rows)
+            valid = (actual_count == snapshot["object_count"]
+                     and actual_digest == snapshot["digest_sha256"])
+            result = {"snapshot_id": snapshot_id, "is_valid": valid,
+                      "expected_count": snapshot["object_count"], "actual_count": actual_count,
+                      "expected_digest": snapshot["digest_sha256"], "actual_digest": actual_digest}
+            if owns:
+                db.commit()
+            return result
+        except Exception:
+            if owns:
+                db.rollback()
+            raise
 
     def compare_hierarchy_snapshot(self, snapshot_id):
         db = self.connection
@@ -428,6 +440,7 @@ class SpectralExtensionStore:
     def restore_hierarchy_snapshot(self, snapshot_id):
         """Restore captured attributes for extant objects; never delete later additions."""
         db = self.connection
+        self.get_hierarchy_snapshot(snapshot_id)
         owns = not db.in_transaction
         if owns:
             db.execute("BEGIN IMMEDIATE")

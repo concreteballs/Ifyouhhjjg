@@ -24,6 +24,10 @@ Experimental software emulator of a spectral-addressed network. The first implem
 - Explicit rejection of unauthenticated detour/control packet types.
 - Optional standalone external diagnostic collector with allowlisted report ingestion, durable acknowledgements and a loopback-only HTTP bridge.
 
+## Spectral field database
+
+The SQLite database initializes a versioned 10×10 spectral field: ten ordered frequency clusters, seven primary mixing clusters, and three service-reserved clusters. Physical boundaries are stored in integer hertz; shade IDs remain independent of RGB/HEX values. Initial gradient indices can be recursively divided into exact rational halves. See [docs/SPECTRAL_FIELD_MODEL.md](docs/SPECTRAL_FIELD_MODEL.md) for the approved field layout and migration details.
+
 ## Internal diagnostic monitor
 
 The monitor starts automatically with `SpectralRuntime`.

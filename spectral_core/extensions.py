@@ -312,14 +312,17 @@ class SpectralExtensionStore:
 
     def create_hierarchy_snapshot(self, snapshot_id, root_object_id=None):
         snapshot_id = self._required(snapshot_id, "snapshot_id")
-        rows = self._snapshot_rows(root_object_id)
-        serial = [list(row) for row in rows]
-        digest = hashlib.sha256(json.dumps(serial, ensure_ascii=False,
-                                           separators=(",", ":")).encode("utf-8")).hexdigest()
         db = self.connection
         owns = not db.in_transaction
+        if owns:
+            db.execute("BEGIN IMMEDIATE")
         db.execute("SAVEPOINT create_hierarchy_snapshot")
         try:
+            rows = self._snapshot_rows(root_object_id)
+            serial = [list(row) for row in rows]
+            digest = hashlib.sha256(json.dumps(
+                serial, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")).hexdigest()
             db.execute(
                 """INSERT INTO spectral_hierarchy_snapshots
                    (snapshot_id, root_object_id, object_count, digest_sha256)
@@ -368,7 +371,10 @@ class SpectralExtensionStore:
                 "expected_digest": snapshot["digest_sha256"], "actual_digest": actual_digest}
 
     def compare_hierarchy_snapshot(self, snapshot_id):
-        owns = not self.connection.in_transaction
+        db = self.connection
+        owns = not db.in_transaction
+        if owns:
+            db.execute("BEGIN IMMEDIATE")
         snapshot = self.get_hierarchy_snapshot(snapshot_id)
         verification = self.verify_hierarchy_snapshot(snapshot_id)
         expected = {row[0]: row[1:] for row in self.connection.execute(
@@ -398,7 +404,7 @@ class SpectralExtensionStore:
                   "is_consistent": verification["is_valid"] and not (added or missing or changed)}
         self._record_event(snapshot_id, "comparison", report)
         if owns:
-            self.connection.commit()
+            db.commit()
         return report
 
     def _record_event(self, snapshot_id, event_type, details):
@@ -418,6 +424,8 @@ class SpectralExtensionStore:
         """Restore captured attributes for extant objects; never delete later additions."""
         db = self.connection
         owns = not db.in_transaction
+        if owns:
+            db.execute("BEGIN IMMEDIATE")
         snapshot_integrity = self.verify_hierarchy_snapshot(snapshot_id)
         if not snapshot_integrity["is_valid"]:
             self._record_event(snapshot_id, "recovery_rejected",

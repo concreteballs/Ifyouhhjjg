@@ -132,7 +132,7 @@ The database work is organized into three packages. Each package includes SQLite
 
 1. **Spectral foundation — complete.** Ten base clusters, 100 initial shades, stable spectral indices, exact mixing and gradients, universal coordinate storage, and geometry transforms that do not change logical IDs.
 2. **Objects and multidimensional structure — complete.** Hierarchical objects and parent relations, reconstruction of the full hierarchy from a terminal spectral address, N-dimensional coordinate systems, exact mathematical transformations, and extensible coordinate spaces.
-3. **Extension and integrity — complete (database migrations 8–9).** Reserved regions and guard-network placeholders, future connection points, semantic and interspace links, hierarchy snapshots, checksum verification, discrepancy detection, and non-destructive recovery.
+3. **Extension and integrity — complete (database migrations 8–10).** Reserved regions and guard-network placeholders, future connection points, semantic and interspace links, hierarchy snapshots, checksum verification, discrepancy detection, and non-destructive recovery.
 
 The database packages do not implement network routing, the meta-router, or the spectral adder. Those remain separate workstreams.
 
@@ -140,3 +140,6 @@ Do not commit real credentials, private keys, production security mappings or pe
 
 
 Package 3 adds reserved-region metadata, future extension points, semantic and interspace object links, immutable hierarchy snapshots, discrepancy reports, integrity-event history and non-destructive recovery. Missing object identities are not silently recreated, and objects added after a snapshot are preserved. These database records do not implement the guard network or any routing/forwarding behavior. See [docs/SPECTRAL_FIELD_MODEL.md](docs/SPECTRAL_FIELD_MODEL.md) for the schema and recovery boundary.
+
+
+The extension layer now records the three service-reserved spectral lines (clusters 1, 2 and 10) as explicit full-line mappings. A reservation covers all ten gradient cells of its cluster; partial-line reservations are not supported. This is structural database metadata, not a guard-network runtime.

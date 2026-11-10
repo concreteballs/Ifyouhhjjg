@@ -583,5 +583,30 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
 
 
+    def test_readdressing_parent_versions_all_descendant_addresses(self):
+        objects = self.db.spectral_objects
+        objects.create_object("address-root", "domain", "Root", "SC03-G00:")
+        objects.create_object("address-child", "section", "Child", "SC04-G01:",
+                              "address-root", 0)
+        old_child_address = objects.get_object("address-child")["address"]
+        updated = objects.update_index_node("address-root", "SC05-G02:")
+        self.assertEqual(updated["address"], "B07-G02")
+        new_child_address = objects.get_object("address-child")["address"]
+        self.assertEqual(new_child_address, "B07-G02/B06-G01")
+        with self.assertRaises(KeyError):
+            objects.resolve_address(old_child_address)
+        self.assertEqual(objects.resolve_address(new_child_address)["hierarchy"][-1]["object_id"],
+                         "address-child")
+        history = self.db.connection.execute(
+            """SELECT version, status, address_value FROM spectral_object_addresses
+               WHERE object_id = 'address-child' ORDER BY version"""
+        ).fetchall()
+        self.assertEqual(history, [
+            (1, "retired", old_child_address),
+            (2, "active", new_child_address),
+        ])
+
+
+
 if __name__ == "__main__":
     unittest.main()

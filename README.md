@@ -126,10 +126,14 @@ The software interfaces are kept separate from the physical implementation. The 
 
 The current router implements graph routing, neighbour-assisted rerouting and authenticated previous-hop correction messages. Durable distributed correction state, central policy distribution and the future photonic interaction model remain future work.
 
-## Next milestones
+## Approved implementation roadmap
 
-1. Persistent endpoint registry and database-backed queries.
-2. More extensive simulation of large spectral fields and router clusters.
-3. A separate 2D interaction/adder experiment using shared core interfaces.
+The database work is organized into three packages. Each package includes SQLite schema/migrations, working programmatic APIs, tests for real operations and recovery, and documentation updates.
+
+1. **Spectral foundation — complete.** Ten base clusters, 100 initial shades, stable spectral indices, exact mixing and gradients, universal coordinate storage, and geometry transforms that do not change logical IDs.
+2. **Objects and multidimensional structure — in final verification.** Hierarchical objects and parent relations, reconstruction of the full hierarchy from a terminal spectral address, N-dimensional coordinate systems, exact mathematical transformations, and extensible coordinate spaces.
+3. **Extension and integrity — not started.** Reserved regions and guard-network placeholders, future connection points, semantic and interspace links, hierarchy duplication and reconciliation, version comparison, discrepancy detection, and recovery.
+
+The database packages do not implement network routing, the meta-router, or the spectral adder. Those remain separate workstreams.
 
 Do not commit real credentials, private keys, production security mappings or personal data to this public repository.

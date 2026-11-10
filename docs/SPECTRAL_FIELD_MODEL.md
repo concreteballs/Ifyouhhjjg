@@ -47,7 +47,7 @@ The interval endpoints are stored as exact numerator/denominator pairs; both val
 
 ## Mixing
 
-Only the seven primary clusters create `spectral_components`. Component IDs are database identities and are not assumed to equal cluster numbers. The three service clusters never become mixing components. Mix coefficients attach to an index-node ID, including any recursively created child, and are stored as reduced exact rational numbers, never floating-point values. The database does not impose that coefficients sum to one; normalization is not assumed by this schema.
+Only the seven primary clusters create `spectral_components`. Component IDs are database identities and are not assumed to equal cluster numbers. The three service clusters never become mixing components. Mix coefficients attach to an index-node ID, including any recursively created child. Coefficients must be non-negative, may be zero, and use a positive denominator; new API writes are reduced through Python exact Fraction arithmetic, never floating point. Legacy coefficient rows are migrated without changing their stored numerator/denominator representation, while preserving their exact rational value. The database does not impose that coefficients sum to one; normalization of the total is not assumed by this schema.
 
 ## Coordinates and geometry
 

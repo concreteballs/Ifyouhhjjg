@@ -1,5 +1,7 @@
 import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 from fractions import Fraction
 
 from spectral_core import SpectralDatabase
@@ -95,6 +97,85 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         address = SpectralAddress("123")
         self.db.put(address, b"preserved")
         self.assertEqual(self.db.get(address), b"preserved")
+
+    def test_set_mix_component_respects_outer_transaction_rollback(self):
+        component_id = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+        ).fetchone()[0]
+        self.db.connection.execute("BEGIN")
+        self.field.set_mix_component("SC03-G00:", component_id, 3, 5)
+        self.assertEqual(len(self.field.mix_components("SC03-G00:")), 1)
+        self.db.connection.rollback()
+        self.assertEqual(self.field.mix_components("SC03-G00:"), [])
+
+    def test_gradient_rows_increase_from_top_to_bottom(self):
+        top = self.geometry.get_coordinates("SC03-G00")
+        bottom = self.geometry.get_coordinates("SC03-G09")
+        self.assertEqual(top[1], {
+            "axis": "gradient-row", "numerator": 0, "denominator": 1
+        })
+        self.assertEqual(bottom[1], {
+            "axis": "gradient-row", "numerator": 9, "denominator": 1
+        })
+        self.assertLess(top[1]["numerator"], bottom[1]["numerator"])
+
+    def test_spectral_data_and_transforms_survive_database_reopen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "spectral-persistence.sqlite"
+            first = SpectralDatabase(path)
+            component_id = first.connection.execute(
+                "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+            ).fetchone()[0]
+            first.spectral_field.set_mix_component("SC03-G00:", component_id, 7, 11)
+            first.spectral_field.geometry.create_coordinate_system(
+                "persisted-3d", "Persistent 3D", ["x", "y", "z"], "unit"
+            )
+            first.spectral_field.geometry.set_coordinates(
+                "SC03-G00", "persisted-3d", [1, (2, 3), 4]
+            )
+            first.spectral_field.geometry.create_scale_transform(
+                "persisted-scale", "persisted-3d", [2, 3, 4]
+            )
+            first.close()
+
+            reopened = SpectralDatabase(path)
+            try:
+                self.assertEqual(
+                    reopened.spectral_field.mix_components("SC03-G00:")[0]["numerator"],
+                    7,
+                )
+                self.assertEqual(
+                    reopened.spectral_field.mix_components("SC03-G00:")[0]["denominator"],
+                    11,
+                )
+                self.assertEqual(
+                    reopened.spectral_field.geometry.get_coordinates(
+                        "SC03-G00", "persisted-3d"
+                    ),
+                    [
+                        {"axis": "x", "numerator": 1, "denominator": 1},
+                        {"axis": "y", "numerator": 2, "denominator": 3},
+                        {"axis": "z", "numerator": 4, "denominator": 1},
+                    ],
+                )
+                transformed = reopened.spectral_field.geometry.apply_transform(
+                    "SC03-G00", "persisted-scale"
+                )
+                self.assertEqual(
+                    [(v["numerator"], v["denominator"])
+                     for v in transformed["coordinates"]],
+                    [(2, 1), (2, 1), (16, 1)],
+                )
+                self.assertEqual(
+                    reopened.connection.execute("PRAGMA integrity_check").fetchone()[0],
+                    "ok",
+                )
+                self.assertEqual(
+                    reopened.connection.execute("PRAGMA foreign_key_check").fetchall(),
+                    [],
+                )
+            finally:
+                reopened.close()
 
     def test_visual_codes_are_not_guessed_or_auto_assigned(self):
         row = self.db.connection.execute(

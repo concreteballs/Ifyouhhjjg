@@ -440,7 +440,7 @@ class SpectralExtensionStore:
     def restore_hierarchy_snapshot(self, snapshot_id):
         """Restore captured attributes for extant objects; never delete later additions."""
         db = self.connection
-        self.get_hierarchy_snapshot(snapshot_id)
+        snapshot = self.get_hierarchy_snapshot(snapshot_id)
         owns = not db.in_transaction
         if owns:
             db.execute("BEGIN IMMEDIATE")

@@ -306,8 +306,6 @@ class SpectralExtensionStore:
                     FROM spectral_objects o LEFT JOIN spectral_object_addresses a
                       ON a.object_id = o.object_id AND a.status = 'active'
                     WHERE o.object_id IN ({marks}) ORDER BY o.object_id""", ids).fetchall()
-        if any(row[6] is None for row in rows):
-            raise RuntimeError("one or more hierarchy objects have no active spectral address")
         return rows
 
     def create_hierarchy_snapshot(self, snapshot_id, root_object_id=None):
@@ -319,6 +317,8 @@ class SpectralExtensionStore:
         db.execute("SAVEPOINT create_hierarchy_snapshot")
         try:
             rows = self._snapshot_rows(root_object_id)
+            if any(row[6] is None for row in rows):
+                raise RuntimeError("one or more hierarchy objects have no active spectral address")
             serial = [list(row) for row in rows]
             digest = hashlib.sha256(json.dumps(
                 serial, ensure_ascii=False, separators=(",", ":")

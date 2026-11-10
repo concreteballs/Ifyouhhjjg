@@ -237,6 +237,15 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
             VALUES (3, 3, 'LF', 30000, 300000, 5, 'primary', 1, 'legacy')""")
         connection.execute("INSERT INTO spectral_components(cluster_id, component_key) VALUES (3, 'cluster-03')")
         connection.execute("INSERT INTO spectral_shades VALUES ('SC03-G00', 3, 3, 0)")
+        connection.execute("""INSERT INTO spectral_index_nodes VALUES
+            ('SC03-G00:', 'SC03-G00', NULL, 'root', '', 0, 0, 1, 1, 10)""")
+        connection.execute("""CREATE TABLE spectral_positions (
+            shade_id TEXT NOT NULL, coordinate_system_id TEXT NOT NULL,
+            x_numerator INTEGER NOT NULL, x_denominator INTEGER NOT NULL,
+            y_numerator INTEGER NOT NULL, y_denominator INTEGER NOT NULL,
+            PRIMARY KEY(shade_id, coordinate_system_id))""")
+        connection.execute("""INSERT INTO spectral_positions VALUES
+            ('SC03-G00', 'spectral-grid-2d-v1', 2, 1, 0, 1)""")
         connection.execute("INSERT INTO spectral_mix_components VALUES ('SC03-G00', 1, 2, 6)")
         connection.commit()
         from spectral_core.spectral_field import SpectralFieldStore
@@ -244,6 +253,20 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         migrated = field.mix_components("SC03-G00:")
         self.assertEqual(migrated[0]["numerator"], 2)
         self.assertEqual(migrated[0]["denominator"], 6)
+        interval = connection.execute(
+            "SELECT lower_numerator, lower_denominator, upper_numerator, upper_denominator "
+            "FROM spectral_index_nodes WHERE node_id = 'SC03-G00:'"
+        ).fetchone()
+        self.assertEqual(interval, ("0", "1", "1", "10"))
+        from spectral_core.geometry import SpectralGeometryStore
+        geometry = SpectralGeometryStore(connection)
+        self.assertEqual(geometry.get_coordinates("SC03-G00"), [
+            {"axis": "cluster-column", "numerator": 2, "denominator": 1},
+            {"axis": "gradient-row", "numerator": 0, "denominator": 1},
+        ])
+        self.assertEqual(connection.execute("PRAGMA table_info(spectral_positions)").fetchall()[2][2].upper(), "TEXT")
+        self.assertEqual(connection.execute("PRAGMA table_info(spectral_position_coordinates)").fetchall()[3][2].upper(), "TEXT")
+        self.assertEqual(connection.execute("PRAGMA table_info(spectral_mix_components)").fetchall()[2][2].upper(), "TEXT")
         self.assertEqual(connection.execute("PRAGMA table_info(spectral_mix_components)").fetchall()[0][1],
                          "index_node_id")
         self.assertEqual(connection.execute(

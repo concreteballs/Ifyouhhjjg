@@ -717,5 +717,53 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(after["address_version"], before["address_version"])
         self.assertEqual(after["hierarchy_order"], 9)
 
+
+    def test_object_metadata_updates_commit_when_called_without_outer_transaction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "object-transactions.sqlite"
+            db = SpectralDatabase(path)
+            objects = db.spectral_objects
+            objects.create_object("transaction-root", "domain", "Before", "SC03-G00:")
+            objects.create_object("transaction-child", "section", "Child", "SC04-G00:",
+                                  "transaction-root", 1)
+
+            objects.rename_object("transaction-root", "After")
+            objects.reorder_object("transaction-child", 7)
+            objects.reparent_object("transaction-child", "transaction-root", 9)
+            db.close()
+
+            reopened = SpectralDatabase(path)
+            try:
+                self.assertEqual(reopened.spectral_objects.get_object("transaction-root")["name"], "After")
+                child = reopened.spectral_objects.get_object("transaction-child")
+                self.assertEqual(child["hierarchy_order"], 9)
+                self.assertEqual(child["parent_object_id"], "transaction-root")
+            finally:
+                reopened.close()
+
+    def test_object_metadata_updates_respect_caller_owned_transaction(self):
+        objects = self.db.spectral_objects
+        objects.create_object("caller-transaction-root", "domain", "Before", "SC03-G00:")
+        self.db.connection.execute("BEGIN")
+        objects.rename_object("caller-transaction-root", "Uncommitted")
+        self.assertTrue(self.db.connection.in_transaction)
+        self.db.connection.rollback()
+        self.assertEqual(objects.get_object("caller-transaction-root")["name"], "Before")
+
+        objects.create_object("caller-transaction-child", "section", "Child", "SC04-G00:",
+                              "caller-transaction-root", 1)
+        self.db.connection.execute("BEGIN")
+        objects.reorder_object("caller-transaction-child", 8)
+        self.assertTrue(self.db.connection.in_transaction)
+        self.db.connection.rollback()
+        self.assertEqual(objects.get_object("caller-transaction-child")["hierarchy_order"], 1)
+
+        self.db.connection.execute("BEGIN")
+        objects.reparent_object("caller-transaction-child", "caller-transaction-root", 9)
+        self.assertTrue(self.db.connection.in_transaction)
+        self.db.connection.rollback()
+        self.assertEqual(objects.get_object("caller-transaction-child")["hierarchy_order"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -28,7 +28,7 @@ class SpectralGeometryStore:
                 coordinate_system_id TEXT NOT NULL,
                 axis_order INTEGER NOT NULL,
                 numerator INTEGER NOT NULL,
-                denominator INTEGER NOT NULL CHECK(denominator > 0),
+                denominator TEXT NOT NULL,
                 PRIMARY KEY(shade_id, coordinate_system_id, axis_order),
                 FOREIGN KEY(coordinate_system_id, axis_order)
                     REFERENCES coordinate_axes(coordinate_system_id, axis_order)
@@ -41,6 +41,24 @@ class SpectralGeometryStore:
                 (shade_id, coordinate_system_id, axis_order, numerator, denominator)
                 SELECT shade_id, coordinate_system_id, 1, y_numerator, y_denominator
                 FROM spectral_positions""")
+
+            # Version 5: generic coordinate rationals also use arbitrary-precision TEXT.
+            coordinate_info = {row[1]: row[2].upper() for row in db.execute("PRAGMA table_info(spectral_position_coordinates)")}
+            if coordinate_info and coordinate_info.get("numerator") != "TEXT":
+                db.execute("ALTER TABLE spectral_position_coordinates RENAME TO spectral_position_coordinates_legacy_exact_v5")
+                db.execute("""CREATE TABLE spectral_position_coordinates (
+                    shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+                    coordinate_system_id TEXT NOT NULL, axis_order INTEGER NOT NULL,
+                    numerator TEXT NOT NULL, denominator TEXT NOT NULL,
+                    PRIMARY KEY(shade_id, coordinate_system_id, axis_order),
+                    FOREIGN KEY(coordinate_system_id, axis_order)
+                        REFERENCES coordinate_axes(coordinate_system_id, axis_order))""")
+                db.execute("""INSERT INTO spectral_position_coordinates
+                    SELECT shade_id, coordinate_system_id, axis_order, CAST(numerator AS TEXT),
+                           CAST(denominator AS TEXT) FROM spectral_position_coordinates_legacy_exact_v5""")
+                db.execute("DROP TABLE spectral_position_coordinates_legacy_exact_v5")
+            db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (5)")
+
             db.execute("""INSERT OR IGNORE INTO spectral_schema_migrations(version)
                 VALUES (3)""")
             db.execute("RELEASE SAVEPOINT spectral_geometry_v1")
@@ -135,13 +153,13 @@ class SpectralGeometryStore:
                     ON CONFLICT(shade_id, coordinate_system_id, axis_order) DO UPDATE SET
                     numerator = excluded.numerator, denominator = excluded.denominator""",
                     (shade_id, coordinate_system_id, order,
-                     value.numerator, value.denominator))
+                     str(value.numerator), str(value.denominator)))
             if coordinate_system_id == self.DEFAULT_SYSTEM and len(fractions) == 2:
                 db.execute("""UPDATE spectral_positions SET
                     x_numerator = ?, x_denominator = ?, y_numerator = ?, y_denominator = ?
                     WHERE shade_id = ? AND coordinate_system_id = ?""",
-                    (fractions[0].numerator, fractions[0].denominator,
-                     fractions[1].numerator, fractions[1].denominator,
+                    (str(fractions[0].numerator), str(fractions[0].denominator),
+                     str(fractions[1].numerator), str(fractions[1].denominator),
                      shade_id, coordinate_system_id))
             db.execute("RELEASE SAVEPOINT set_spectral_coordinates")
             if owns:
@@ -161,7 +179,7 @@ class SpectralGeometryStore:
             (shade_id, coordinate_system_id)).fetchall()
         if len(rows) != system["dimension_count"] or [r[0] for r in rows] != list(range(system["dimension_count"])):
             raise KeyError("shade has no complete position in this coordinate system")
-        return [{"axis": system["axes"][i], "numerator": n, "denominator": d}
+        return [{"axis": system["axes"][i], "numerator": int(n), "denominator": int(d)}
                 for i, n, d in rows]
 
     def create_affine_transform(self, transform_id: str, coordinate_system_id: str,

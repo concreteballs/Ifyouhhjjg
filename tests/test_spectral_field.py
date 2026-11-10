@@ -73,6 +73,32 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 self.field.split_index(shade_id)
 
+    def test_index_split_persists_and_respects_outer_transaction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "split-persistence.sqlite"
+            db = SpectralDatabase(path)
+            children = db.spectral_field.split_index("SC03-G00")
+            self.assertEqual([item["path"] for item in children], ["0", "1"])
+            db.close()
+
+            reopened = SpectralDatabase(path)
+            persisted = reopened.connection.execute(
+                "SELECT path FROM spectral_index_nodes WHERE shade_id = ? ORDER BY path",
+                ("SC03-G00",)
+            ).fetchall()
+            self.assertEqual([row[0] for row in persisted], ["", "0", "1"])
+            reopened.close()
+
+        connection = self.db.connection
+        connection.execute("BEGIN")
+        self.field.split_index("SC04-G00")
+        connection.rollback()
+        remaining = connection.execute(
+            "SELECT COUNT(*) FROM spectral_index_nodes WHERE shade_id = ? AND path <> ''",
+            ("SC04-G00",)
+        ).fetchone()[0]
+        self.assertEqual(remaining, 0)
+
     def test_index_node_cannot_be_split_twice(self):
         self.field.split_index("SC03-G00")
         with self.assertRaises(ValueError):

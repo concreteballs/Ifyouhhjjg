@@ -126,7 +126,7 @@ Migration 8 adds database metadata for future growth without implementing runtim
 - `spectral_extension_points` records planned connection, dimension and integration points. Points can reference a reserved region, an existing object and/or a coordinate system.
 - `spectral_semantic_links` stores typed relationships between distinct objects. These are meaning-level database relations, not packet routes.
 - `spectral_interspace_links` records relations between object endpoints in explicitly named coordinate systems. It does not calculate a route or transform coordinates automatically.
-- `spectral_hierarchy_snapshots` and `spectral_hierarchy_snapshot_objects` store immutable, checksummed copies of object hierarchy and active addresses.
+- `spectral_hierarchy_snapshots` and `spectral_hierarchy_snapshot_objects` store immutable, checksummed copies of object hierarchy and active addresses. `verify_hierarchy_snapshot` recomputes the SHA-256 digest and object count; comparison reports snapshot validity, and recovery is rejected if the stored snapshot has been altered. Snapshots may cover the full hierarchy or one root object's subtree; scoped comparisons ignore unrelated objects outside that subtree.
 - `spectral_integrity_events` records comparison and recovery outcomes.
 
 The API is exposed as `database.spectral_extensions` (class `SpectralExtensionStore`). It supports region and extension-point management, semantic/interspace link creation and lookup, hierarchy snapshot creation, comparison, event inspection and cautious recovery.

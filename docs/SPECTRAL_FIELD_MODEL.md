@@ -113,3 +113,7 @@ The object API supports:
 - `reparent_object(object_id, new_parent_object_id, hierarchy_order=None)`: moves a subtree, prevents cycles, and creates new address versions for the moved object and all descendants atomically.
 
 Address resolution validates that the active snapshot's index nodes still match the current objects, that the segments form a complete root-to-terminal chain, and that every parent relation is correct.
+
+\n## Object coordinate transforms and root access (package 2 completion)\n\n
+Object positions use the same coordinate-system definitions and exact rational values as shade positions. The object API exposes `apply_transform_to_object(object_id, transform_id)`, which evaluates a previously stored affine transform in the object's coordinate system and returns derived coordinates. It does not overwrite canonical object coordinates, object identity, or spectral addresses. A transform belonging to another coordinate system cannot be applied because the object must have a complete position in the transform's declared system.\n\n
+Top-level objects are retrieved with `roots()`, ordered by `hierarchy_order` and then stable object ID. `children(parent_object_id)` is reserved for direct descendants and rejects `None`; this avoids ambiguity between an absent parent and a SQL `NULL` comparison.\n

@@ -697,6 +697,20 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             objects.resolve_address(objects.get_object("integrity-root")["address"])
 
+    def test_active_address_resolution_detects_address_string_snapshot_mismatch(self):
+        objects = self.db.spectral_objects
+        objects.create_object("integrity-string-root", "domain", "Root", "SC03-G00:")
+        active_id = self.db.connection.execute(
+            "SELECT address_id FROM spectral_object_addresses WHERE object_id = ? AND status = 'active'",
+            ("integrity-string-root",)
+        ).fetchone()[0]
+        self.db.connection.execute(
+            "UPDATE spectral_object_addresses SET address_value = ? WHERE address_id = ?",
+            ("B08-G00", active_id)
+        )
+        with self.assertRaisesRegex(RuntimeError, "saved address does not match"):
+            objects.resolve_address("B08-G00")
+
     def test_migration_v7_preserves_foreign_keys_and_active_address_index(self):
         self.assertEqual(self.db.connection.execute(
             "SELECT version FROM spectral_schema_migrations WHERE version = 7"

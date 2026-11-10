@@ -48,7 +48,31 @@ class SpectralFieldStore:
         db.execute("PRAGMA foreign_keys = ON")
         db.execute("SAVEPOINT spectral_field_v1")
         try:
+            # Upgrade the earlier additive schema without discarding stored mix data.
+            old_mix_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(spectral_mix_components)")
+            }
+            legacy_mix = "shade_id" in old_mix_columns and "index_node_id" not in old_mix_columns
+            if legacy_mix:
+                db.execute(
+                    "ALTER TABLE spectral_mix_components RENAME TO spectral_mix_components_legacy_v1"
+                )
+
+            cluster_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(spectral_clusters)")
+            }
+            if cluster_columns and "visual_order" not in cluster_columns:
+                db.execute("ALTER TABLE spectral_clusters ADD COLUMN visual_order INTEGER")
+                db.execute(
+                    """UPDATE spectral_clusters SET visual_order = cluster_order - 2
+                       WHERE role = 'primary'"""
+                )
+
             statements = (
+                """CREATE TABLE IF NOT EXISTS spectral_schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )""",
                 """CREATE TABLE IF NOT EXISTS spectral_palette_versions (
                     palette_version_id INTEGER PRIMARY KEY,
                     version_key TEXT NOT NULL UNIQUE,
@@ -166,8 +190,8 @@ class SpectralFieldStore:
                 if mixing:
                     db.execute(
                         """INSERT OR IGNORE INTO spectral_components
-                           (component_id, cluster_id, component_key) VALUES (?, ?, ?)""",
-                        (order, order, f"cluster-{order:02d}"),
+                           (cluster_id, component_key) VALUES (?, ?)""",
+                        (order, f"cluster-{order:02d}"),
                     )
                 for row in range(10):
                     shade_id = f"SC{order:02d}-G{row:02d}"
@@ -211,6 +235,18 @@ class SpectralFieldStore:
                            VALUES (?, 'spectral-grid-2d-v1', ?, 1, ?, 1)""",
                         (shade_id, order - 1, row),
                     )
+            if legacy_mix:
+                db.execute(
+                    """INSERT OR IGNORE INTO spectral_mix_components
+                       (index_node_id, component_id, coefficient_numerator, coefficient_denominator)
+                       SELECT old.shade_id || ':', old.component_id,
+                              old.coefficient_numerator, old.coefficient_denominator
+                       FROM spectral_mix_components_legacy_v1 old
+                       JOIN spectral_index_nodes node
+                         ON node.shade_id = old.shade_id AND node.path = ''"""
+                )
+                db.execute("DROP TABLE spectral_mix_components_legacy_v1")
+            db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (1), (2)")
             db.execute("RELEASE SAVEPOINT spectral_field_v1")
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT spectral_field_v1")

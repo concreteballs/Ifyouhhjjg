@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from fractions import Fraction
 
 from spectral_core import SpectralDatabase
 
@@ -8,6 +9,7 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
     def setUp(self):
         self.db = SpectralDatabase()
         self.field = self.db.spectral_field
+        self.geometry = self.field.geometry
 
     def tearDown(self):
         self.db.close()
@@ -75,9 +77,7 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         ).fetchone()[0]
         child = self.field.split_index("SC03-G00")[0]
         self.field.set_mix_component(child["node_id"], component3, 1, 2)
-        self.assertEqual(
-            self.field.mix_components(child["node_id"])[0]["numerator"], 1
-        )
+        self.assertEqual(self.field.mix_components(child["node_id"])[0]["numerator"], 1)
 
     def test_service_shade_cannot_be_used_in_mixing(self):
         component3 = self.db.connection.execute(
@@ -103,83 +103,105 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (None, None))
 
-
     def test_upgrade_preserves_earlier_mix_rows_as_root_index_values(self):
         connection = sqlite3.connect(":memory:")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("""CREATE TABLE spectral_clusters (
-            cluster_id INTEGER PRIMARY KEY,
-            cluster_order INTEGER NOT NULL UNIQUE,
-            designation TEXT NOT NULL UNIQUE,
-            lower_hz INTEGER NOT NULL,
-            upper_hz INTEGER NOT NULL,
-            standard_band_number INTEGER,
-            role TEXT NOT NULL,
-            mixing_enabled INTEGER NOT NULL,
-            source_note TEXT NOT NULL
-        )""")
+            cluster_id INTEGER PRIMARY KEY, cluster_order INTEGER NOT NULL UNIQUE,
+            designation TEXT NOT NULL UNIQUE, lower_hz INTEGER NOT NULL,
+            upper_hz INTEGER NOT NULL, standard_band_number INTEGER,
+            role TEXT NOT NULL, mixing_enabled INTEGER NOT NULL, source_note TEXT NOT NULL)""")
         connection.execute("""CREATE TABLE spectral_components (
             component_id INTEGER PRIMARY KEY AUTOINCREMENT,
             cluster_id INTEGER NOT NULL UNIQUE REFERENCES spectral_clusters(cluster_id),
-            component_key TEXT NOT NULL UNIQUE
-        )""")
+            component_key TEXT NOT NULL UNIQUE)""")
         connection.execute("""CREATE TABLE spectral_shades (
-            shade_id TEXT PRIMARY KEY,
-            cluster_id INTEGER NOT NULL REFERENCES spectral_clusters(cluster_id),
-            grid_column INTEGER NOT NULL,
-            grid_row INTEGER NOT NULL,
-            UNIQUE(cluster_id, grid_row),
-            UNIQUE(grid_column, grid_row)
-        )""")
+            shade_id TEXT PRIMARY KEY, cluster_id INTEGER NOT NULL REFERENCES spectral_clusters(cluster_id),
+            grid_column INTEGER NOT NULL, grid_row INTEGER NOT NULL,
+            UNIQUE(cluster_id, grid_row), UNIQUE(grid_column, grid_row))""")
         connection.execute("""CREATE TABLE spectral_index_nodes (
-            node_id TEXT PRIMARY KEY,
-            shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
-            parent_node_id TEXT REFERENCES spectral_index_nodes(node_id),
-            branch TEXT NOT NULL,
-            path TEXT NOT NULL,
-            depth INTEGER NOT NULL,
-            lower_numerator INTEGER NOT NULL,
-            lower_denominator INTEGER NOT NULL,
-            upper_numerator INTEGER NOT NULL,
-            upper_denominator INTEGER NOT NULL,
-            UNIQUE(shade_id, path)
-        )""")
+            node_id TEXT PRIMARY KEY, shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+            parent_node_id TEXT REFERENCES spectral_index_nodes(node_id), branch TEXT NOT NULL,
+            path TEXT NOT NULL, depth INTEGER NOT NULL, lower_numerator INTEGER NOT NULL,
+            lower_denominator INTEGER NOT NULL, upper_numerator INTEGER NOT NULL,
+            upper_denominator INTEGER NOT NULL, UNIQUE(shade_id, path))""")
         connection.execute("""CREATE TABLE spectral_mix_components (
             shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
             component_id INTEGER NOT NULL REFERENCES spectral_components(component_id),
-            coefficient_numerator INTEGER NOT NULL,
-            coefficient_denominator INTEGER NOT NULL,
-            PRIMARY KEY(shade_id, component_id)
-        )""")
-        connection.execute(
-            """INSERT INTO spectral_clusters
-               VALUES (3, 3, 'LF', 30000, 300000, 5, 'primary', 1, 'legacy')"""
-        )
-        connection.execute(
-            "INSERT INTO spectral_components(cluster_id, component_key) VALUES (3, 'cluster-03')"
-        )
-        connection.execute(
-            "INSERT INTO spectral_shades VALUES ('SC03-G00', 3, 3, 0)"
-        )
-        connection.execute(
-            "INSERT INTO spectral_mix_components VALUES ('SC03-G00', 1, 2, 6)"
-        )
+            coefficient_numerator INTEGER NOT NULL, coefficient_denominator INTEGER NOT NULL,
+            PRIMARY KEY(shade_id, component_id))""")
+        connection.execute("""INSERT INTO spectral_clusters
+            VALUES (3, 3, 'LF', 30000, 300000, 5, 'primary', 1, 'legacy')""")
+        connection.execute("INSERT INTO spectral_components(cluster_id, component_key) VALUES (3, 'cluster-03')")
+        connection.execute("INSERT INTO spectral_shades VALUES ('SC03-G00', 3, 3, 0)")
+        connection.execute("INSERT INTO spectral_mix_components VALUES ('SC03-G00', 1, 2, 6)")
         from spectral_core.spectral_field import SpectralFieldStore
         field = SpectralFieldStore(connection)
         migrated = field.mix_components("SC03-G00:")
         self.assertEqual(migrated[0]["numerator"], 2)
         self.assertEqual(migrated[0]["denominator"], 6)
-        self.assertEqual(
-            connection.execute("PRAGMA table_info(spectral_mix_components)").fetchall()[0][1],
-            "index_node_id",
-        )
-        self.assertEqual(
-            connection.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='spectral_mix_components_legacy_v1'"
-            ).fetchone()[0],
-            0,
-        )
+        self.assertEqual(connection.execute("PRAGMA table_info(spectral_mix_components)").fetchall()[0][1],
+                         "index_node_id")
+        self.assertEqual(connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='spectral_mix_components_legacy_v1'"
+        ).fetchone()[0], 0)
         connection.close()
+
+    def test_existing_two_dimensional_positions_are_migrated_to_generic_axes(self):
+        rows = self.geometry.get_coordinates("SC03-G04")
+        self.assertEqual(rows, [
+            {"axis": "cluster-column", "numerator": 2, "denominator": 1},
+            {"axis": "gradient-row", "numerator": 4, "denominator": 1},
+        ])
+        self.assertEqual(self.db.connection.execute(
+            "SELECT COUNT(*) FROM spectral_position_coordinates"
+        ).fetchone()[0], 200)
+
+    def test_exact_scale_and_translation_do_not_change_shade_identity(self):
+        before = self.geometry.get_coordinates("SC03-G04")
+        self.geometry.create_affine_transform(
+            "scale-and-shift", "spectral-grid-2d-v1",
+            [[2, 0], [0, 3]], [1, -1])
+        result = self.geometry.apply_transform("SC03-G04", "scale-and-shift")
+        self.assertEqual(result["coordinates"], [
+            {"axis": "cluster-column", "numerator": 5, "denominator": 1},
+            {"axis": "gradient-row", "numerator": 11, "denominator": 1},
+        ])
+        self.assertEqual(self.geometry.get_coordinates("SC03-G04"), before)
+        self.assertEqual(result["shade_id"], "SC03-G04")
+        self.assertEqual(self.geometry.apply_transform_to_field("scale-and-shift")[0]["shade_id"],
+                         "SC01-G00")
+
+    def test_fractional_scale_remains_exact(self):
+        self.geometry.create_scale_transform("half-scale", "spectral-grid-2d-v1",
+                                             [Fraction(1, 2), Fraction(1, 3)])
+        result = self.geometry.apply_transform("SC03-G03", "half-scale")
+        self.assertEqual([(v["numerator"], v["denominator"]) for v in result["coordinates"]],
+                         [(1, 1), (1, 1)])
+
+    def test_coordinate_system_supports_more_than_two_dimensions(self):
+        self.geometry.create_coordinate_system(
+            "spectral-space-3d-v1", "Three dimensional extension",
+            ["cluster", "gradient", "depth"], "grid-unit")
+        self.geometry.set_coordinates("SC03-G04", "spectral-space-3d-v1", [2, 4, (3, 2)])
+        self.assertEqual(self.geometry.get_coordinates("SC03-G04", "spectral-space-3d-v1"), [
+            {"axis": "cluster", "numerator": 2, "denominator": 1},
+            {"axis": "gradient", "numerator": 4, "denominator": 1},
+            {"axis": "depth", "numerator": 3, "denominator": 2},
+        ])
+        self.geometry.create_affine_transform(
+            "3d-affine", "spectral-space-3d-v1",
+            [[1, 0, 0], [0, 2, 0], [0, 0, 1]], [0, 1, (1, 2)])
+        transformed = self.geometry.apply_transform("SC03-G04", "3d-affine")
+        self.assertEqual([(v["numerator"], v["denominator"]) for v in transformed["coordinates"]],
+                         [(2, 1), (9, 1), (2, 1)])
+
+    def test_coordinate_dimension_and_transform_shapes_are_validated(self):
+        with self.assertRaises(ValueError):
+            self.geometry.set_coordinates("SC03-G00", "spectral-grid-2d-v1", [1, 2, 3])
+        with self.assertRaises(ValueError):
+            self.geometry.create_affine_transform(
+                "bad-matrix", "spectral-grid-2d-v1", [[1, 0]], [0, 0])
 
 
 if __name__ == "__main__":

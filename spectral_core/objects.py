@@ -422,7 +422,17 @@ class SpectralObjectStore:
         return dict(zip(("object_id", "object_type", "name", "parent_object_id",
                          "hierarchy_order", "address", "address_version"), row))
 
+    def roots(self):
+        """Return top-level objects in stable sibling order."""
+        return [self.get_object(row[0]) for row in self.connection.execute(
+            """SELECT object_id FROM spectral_objects WHERE parent_object_id IS NULL
+               ORDER BY hierarchy_order, object_id"""
+        ).fetchall()]
+
     def children(self, parent_object_id):
+        """Return direct children; use roots() to retrieve top-level objects."""
+        if parent_object_id is None:
+            raise ValueError("parent_object_id must be an object ID; use roots() for top-level objects")
         return [self.get_object(row[0]) for row in self.connection.execute(
             """SELECT object_id FROM spectral_objects WHERE parent_object_id = ?
                ORDER BY hierarchy_order, object_id""", (parent_object_id,)
@@ -517,3 +527,36 @@ class SpectralObjectStore:
             raise KeyError("object has no complete position in this coordinate system")
         return [{"axis": system["axes"][i], "numerator": int(n), "denominator": int(d)}
                 for i, n, d in rows]
+
+    def apply_transform_to_object(self, object_id, transform_id):
+        """Return transformed object coordinates without changing its stored position."""
+        object_id = self._required(object_id, "object_id")
+        row = self.connection.execute(
+            """SELECT coordinate_system_id, parameters_json
+               FROM geometry_transforms WHERE transform_id = ?""",
+            (transform_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError("geometry transform does not exist")
+        coordinate_system_id, raw = row
+        coords = self.get_coordinates(object_id, coordinate_system_id)
+        import json
+        payload = json.loads(raw)
+        vector = [Fraction(item["numerator"], item["denominator"]) for item in coords]
+        matrix = [[Fraction(*pair) for pair in line] for line in payload["matrix"]]
+        offset = [Fraction(*pair) for pair in payload["offset"]]
+        result = [
+            sum((matrix[i][j] * vector[j] for j in range(len(vector))), Fraction(0, 1))
+            + offset[i]
+            for i in range(len(vector))
+        ]
+        return {
+            "object_id": object_id,
+            "coordinate_system_id": coordinate_system_id,
+            "transform_id": transform_id,
+            "coordinates": [
+                {"axis": coords[i]["axis"], "numerator": value.numerator,
+                 "denominator": value.denominator}
+                for i, value in enumerate(result)
+            ],
+        }

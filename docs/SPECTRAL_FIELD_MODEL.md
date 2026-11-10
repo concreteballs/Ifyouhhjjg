@@ -140,3 +140,15 @@ The API is exposed as `database.spectral_extensions` (class `SpectralExtensionSt
 Recovery restores captured attributes for objects that still exist. It does not silently recreate deleted object identities or delete objects added after the snapshot. Missing identities cause recovery to be rejected and recorded. Newly added objects are preserved and remain visible as discrepancies after recovery. This makes recovery non-destructive by default; identity recreation and destructive pruning require a separate explicit policy.
 
 This layer is database-only. It does not implement the guard network, network routing, meta-routing, packet forwarding, or the spectral adder.
+
+
+## Full-line reservation mapping (migration version 10)
+
+Migration 10 adds `spectral_reserved_region_lines`. A reserved-region record is now structurally bound to a complete service-cluster line through its `cluster_id`; partial-row or partial-cell reservations are not represented. The mapping is one-to-one: a region maps to one cluster and a cluster can be assigned to only one reserved region. A database trigger restricts these full-line service reservations to clusters whose field role is `service`.
+
+The initial field's three service lines are seeded as explicit reservations:
+- cluster 1 — `service-line-01`;
+- cluster 2 — `service-line-02`;
+- cluster 10 — `service-line-10`.
+
+Each currently contains ten gradient shades. The mapping is exposed through `database.spectral_extensions.reserved_lines()` and `get_reserved_line(cluster_order)`. `bind_reserved_region_to_line(region_id, cluster_order)` binds an additional reserved-region record to a service line, subject to the one-region-per-line constraint. This is database-level structural reservation metadata; it does not implement guard-network behavior, routing, forwarding, or runtime access control.

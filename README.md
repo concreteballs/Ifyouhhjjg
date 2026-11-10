@@ -132,7 +132,7 @@ The database work is organized into three packages. Each package includes SQLite
 
 1. **Spectral foundation — complete.** Ten base clusters, 100 initial shades, stable spectral indices, exact mixing and gradients, universal coordinate storage, and geometry transforms that do not change logical IDs.
 2. **Objects and multidimensional structure — complete.** Hierarchical objects and parent relations, reconstruction of the full hierarchy from a terminal spectral address, N-dimensional coordinate systems, exact mathematical transformations, and extensible coordinate spaces.
-3. **Extension and integrity — complete (database migration 8).** Reserved regions and guard-network placeholders, future connection points, semantic and interspace links, hierarchy snapshots, checksum verification, discrepancy detection, and non-destructive recovery.
+3. **Extension and integrity — complete (database migrations 8–9).** Reserved regions and guard-network placeholders, future connection points, semantic and interspace links, hierarchy snapshots, checksum verification, discrepancy detection, and non-destructive recovery.
 
 The database packages do not implement network routing, the meta-router, or the spectral adder. Those remain separate workstreams.
 

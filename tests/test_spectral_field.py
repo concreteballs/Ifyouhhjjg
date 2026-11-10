@@ -532,5 +532,54 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
                 "bad-matrix", "spectral-grid-2d-v1", [[1, 0]], [0, 0])
 
 
+    def test_objects_build_itu_spectral_addresses_and_resolve_ancestry(self):
+        objects = self.db.spectral_objects
+        root = objects.create_object("obj-root", "domain", "Example",
+                                     "SC03-G00:")
+        child = objects.create_object("obj-child", "section", "Products",
+                                       "SC04-G02:", "obj-root", 0)
+        leaf = objects.create_object("obj-leaf", "page", "Item",
+                                      "SC05-G03:01", "obj-child", 0)
+        self.assertEqual(root["address"], "B05-G00")
+        self.assertEqual(child["address"], "B05-G00/B06-G02")
+        self.assertEqual(leaf["address"], "B05-G00/B06-G02/B07-G03~01")
+        resolved = objects.resolve_address(leaf["address"])
+        self.assertEqual([x["object_id"] for x in resolved["hierarchy"]],
+                         ["obj-root", "obj-child", "obj-leaf"])
+        self.assertEqual([x["component"] for x in resolved["hierarchy"]],
+                         ["B05-G00", "B06-G02", "B07-G03~01"])
+
+    def test_object_address_rejects_reserved_bands_and_duplicate_addresses(self):
+        objects = self.db.spectral_objects
+        with self.assertRaises(PermissionError):
+            objects.create_object("reserved", "domain", "Reserved", "SC01-G00:")
+        objects.create_object("first", "domain", "First", "SC03-G00:")
+        with self.assertRaises(sqlite3.IntegrityError):
+            objects.create_object("second", "domain", "Second", "SC03-G00:")
+
+    def test_object_coordinates_reuse_exact_ndimensional_geometry(self):
+        objects = self.db.spectral_objects
+        objects.create_object("spatial-object", "site", "Site", "SC03-G01:")
+        self.geometry.create_coordinate_system(
+            "object-space-3d", "Object 3D", ["x", "y", "z"], "unit")
+        objects.set_coordinates("spatial-object", "object-space-3d",
+                                [Fraction(1, 3), 2, Fraction(1, 2 ** 90)])
+        self.assertEqual(objects.get_coordinates("spatial-object", "object-space-3d"), [
+            {"axis": "x", "numerator": 1, "denominator": 3},
+            {"axis": "y", "numerator": 2, "denominator": 1},
+            {"axis": "z", "numerator": 1, "denominator": 2 ** 90},
+        ])
+
+    def test_object_address_tables_migrate_additively_and_preserve_existing_data(self):
+        self.db.put(__import__("spectral_core").SpectralAddress("123"), b"old")
+        objects = self.db.spectral_objects
+        objects.create_object("persist", "domain", "Persist", "SC03-G04:")
+        self.assertEqual(self.db.get(__import__("spectral_core").SpectralAddress("123")), b"old")
+        self.assertEqual(self.db.connection.execute(
+            "SELECT version FROM spectral_schema_migrations WHERE version = 6"
+        ).fetchone(), (6,))
+        self.assertEqual(self.db.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

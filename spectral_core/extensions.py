@@ -108,6 +108,16 @@ class SpectralExtensionStore:
             for statement in statements:
                 db.execute(statement)
             db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (8)")
+            snapshot_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(spectral_hierarchy_snapshots)")
+            }
+            if "digest_version" not in snapshot_columns:
+                db.execute(
+                    """ALTER TABLE spectral_hierarchy_snapshots
+                       ADD COLUMN digest_version INTEGER NOT NULL DEFAULT 1
+                       CHECK(digest_version IN (1, 2))"""
+                )
+            db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (9)")
             violations = db.execute("PRAGMA foreign_key_check").fetchall()
             if violations:
                 raise RuntimeError(f"foreign-key violations after extension migration: {violations[:5]}")
@@ -126,6 +136,23 @@ class SpectralExtensionStore:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{label} must be a non-empty string")
         return value.strip()
+
+    @staticmethod
+    def _snapshot_digest(snapshot_id, root_object_id, object_count, rows, version=2):
+        serial = [list(row) for row in rows]
+        if version == 1:
+            payload = serial
+        else:
+            payload = {
+                "snapshot_id": snapshot_id,
+                "root_object_id": root_object_id,
+                "object_count": object_count,
+                "objects": serial,
+            }
+        encoded = json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":"), sort_keys=(version != 1)
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
     def _json(value):
@@ -319,14 +346,13 @@ class SpectralExtensionStore:
             rows = self._snapshot_rows(root_object_id)
             if any(row[6] is None for row in rows):
                 raise RuntimeError("one or more hierarchy objects have no active spectral address")
-            serial = [list(row) for row in rows]
-            digest = hashlib.sha256(json.dumps(
-                serial, ensure_ascii=False, separators=(",", ":")
-            ).encode("utf-8")).hexdigest()
+            digest = self._snapshot_digest(
+                snapshot_id, root_object_id, len(rows), rows, version=2
+            )
             db.execute(
                 """INSERT INTO spectral_hierarchy_snapshots
-                   (snapshot_id, root_object_id, object_count, digest_sha256)
-                   VALUES (?, ?, ?, ?)""",
+                   (snapshot_id, root_object_id, object_count, digest_sha256, digest_version)
+                   VALUES (?, ?, ?, ?, 2)""",
                 (snapshot_id, root_object_id, len(rows), digest))
             db.executemany(
                 """INSERT INTO spectral_hierarchy_snapshot_objects
@@ -347,11 +373,13 @@ class SpectralExtensionStore:
 
     def get_hierarchy_snapshot(self, snapshot_id):
         row = self.connection.execute(
-            """SELECT snapshot_id, root_object_id, object_count, digest_sha256, created_at
+            """SELECT snapshot_id, root_object_id, object_count, digest_sha256,
+                      created_at, digest_version
                FROM spectral_hierarchy_snapshots WHERE snapshot_id = ?""", (snapshot_id,)).fetchone()
         if row is None:
             raise KeyError("hierarchy snapshot does not exist")
-        return dict(zip(("snapshot_id", "root_object_id", "object_count", "digest_sha256", "created_at"), row))
+        return dict(zip(("snapshot_id", "root_object_id", "object_count", "digest_sha256",
+                         "created_at", "digest_version"), row))
 
     def verify_hierarchy_snapshot(self, snapshot_id):
         db = self.connection
@@ -365,13 +393,15 @@ class SpectralExtensionStore:
                           index_node_id, address_value
                    FROM spectral_hierarchy_snapshot_objects
                    WHERE snapshot_id = ? ORDER BY object_id""", (snapshot_id,)).fetchall()
-            serial = [list(row) for row in rows]
-            actual_digest = hashlib.sha256(json.dumps(
-                serial, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+            actual_digest = self._snapshot_digest(
+                snapshot_id, snapshot["root_object_id"], len(rows), rows,
+                version=snapshot["digest_version"]
+            )
             actual_count = len(rows)
             valid = (actual_count == snapshot["object_count"]
                      and actual_digest == snapshot["digest_sha256"])
             result = {"snapshot_id": snapshot_id, "is_valid": valid,
+                      "digest_version": snapshot["digest_version"],
                       "expected_count": snapshot["object_count"], "actual_count": actual_count,
                       "expected_digest": snapshot["digest_sha256"], "actual_digest": actual_digest}
             if owns:

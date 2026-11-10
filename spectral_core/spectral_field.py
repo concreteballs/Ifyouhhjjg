@@ -162,8 +162,9 @@ class SpectralFieldStore:
                 )
                 if mixing:
                     db.execute(
-                        "INSERT OR IGNORE INTO spectral_components(cluster_id, component_key) VALUES (?, ?)",
-                        (order, f"cluster-{order:02d}"),
+                        """INSERT OR IGNORE INTO spectral_components
+                           (component_id, cluster_id, component_key) VALUES (?, ?, ?)""",
+                        (order, order, f"cluster-{order:02d}"),
                     )
                 for row in range(10):
                     shade_id = f"SC{order:02d}-G{row:02d}"

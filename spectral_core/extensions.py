@@ -291,7 +291,7 @@ class SpectralExtensionStore:
             rows = self.connection.execute(
                 """SELECT o.object_id, o.object_type, o.name, o.parent_object_id,
                           o.hierarchy_order, o.index_node_id, a.address_value
-                   FROM spectral_objects o JOIN spectral_object_addresses a
+                   FROM spectral_objects o LEFT JOIN spectral_object_addresses a
                      ON a.object_id = o.object_id AND a.status = 'active'
                    ORDER BY o.object_id""").fetchall()
         else:
@@ -303,9 +303,11 @@ class SpectralExtensionStore:
             rows = self.connection.execute(
                 f"""SELECT o.object_id, o.object_type, o.name, o.parent_object_id,
                            o.hierarchy_order, o.index_node_id, a.address_value
-                    FROM spectral_objects o JOIN spectral_object_addresses a
+                    FROM spectral_objects o LEFT JOIN spectral_object_addresses a
                       ON a.object_id = o.object_id AND a.status = 'active'
                     WHERE o.object_id IN ({marks}) ORDER BY o.object_id""", ids).fetchall()
+        if any(row[6] is None for row in rows):
+            raise RuntimeError("one or more hierarchy objects have no active spectral address")
         return rows
 
     def create_hierarchy_snapshot(self, snapshot_id, root_object_id=None):

@@ -99,3 +99,17 @@ Each address segment is derived from the selected index node and its existing sh
 An object's own index node is stored separately from its object ID. Address snapshots record the entire root-to-object chain, so resolving a terminal address returns the full object hierarchy and verifies that each segment still follows the parent relation. Address uniqueness is enforced. A duplicate active address is rejected rather than silently shared.
 
 Coordinates use the same exact rational rules as shade coordinates: numerator and denominator are decimal TEXT, and float inputs are rejected. Object positions do not alter object IDs or spectral addresses. This milestone does not implement routing, meta-routing, the adder, or the guard network.
+
+
+## Object hierarchy operations and address history (migration version 7)
+
+Migration 7 removes global uniqueness from retired address history and enforces uniqueness only among active complete addresses. An address can therefore be used again after an object's hierarchy or spectral index returns to an earlier state, provided no other object currently owns that active complete address. Historical rows remain retired and versioned.
+
+The database does not impose a temporary route-exclusion timer. Such an exclusion belongs to a particular packet and route attempt, not to the global spectral address or to other packets. Packet-specific retry suppression and alternate-route selection are routing-layer behavior and are outside this database milestone.
+
+The object API supports:
+- `rename_object(object_id, name)`: changes the display name without changing address identity.
+- `reorder_object(object_id, hierarchy_order)`: changes sibling order without changing the address.
+- `reparent_object(object_id, new_parent_object_id, hierarchy_order=None)`: moves a subtree, prevents cycles, and creates new address versions for the moved object and all descendants atomically.
+
+Address resolution validates that the active snapshot's index nodes still match the current objects, that the segments form a complete root-to-terminal chain, and that every parent relation is correct.

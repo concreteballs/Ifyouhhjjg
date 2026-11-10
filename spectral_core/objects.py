@@ -343,7 +343,12 @@ class SpectralObjectStore:
             (object_id,)
         ).fetchone()
         new_order = current[1] if hierarchy_order is None else hierarchy_order
-        if current[0] == new_parent_object_id and current[1] == new_order:
+        if current[0] == new_parent_object_id:
+            if current[1] != new_order:
+                db.execute(
+                    "UPDATE spectral_objects SET hierarchy_order = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
+                    (new_order, object_id)
+                )
             return self.get_object(object_id)
         owns = not db.in_transaction
         db.execute("SAVEPOINT reparent_spectral_object")

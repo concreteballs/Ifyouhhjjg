@@ -721,6 +721,121 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertIn("spectral_object_active_address_value", indexes)
         self.assertEqual(self.db.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
 
+    def test_real_v6_to_v7_upgrade_preserves_address_history_and_segments(self):
+        objects = self.db.spectral_objects
+        objects.create_object("upgrade-root", "domain", "Root", "SC03-G00:")
+        objects.create_object("upgrade-child", "section", "Child", "SC04-G00:",
+                              "upgrade-root", 1)
+        objects.update_index_node("upgrade-root", "SC05-G00:")
+
+        connection = self.db.connection
+        addresses_before = connection.execute(
+            """SELECT address_id, object_id, version, address_value, status
+               FROM spectral_object_addresses ORDER BY address_id"""
+        ).fetchall()
+        segments_before = connection.execute(
+            """SELECT address_id, segment_order, object_id, index_node_id
+               FROM spectral_object_address_segments
+               ORDER BY address_id, segment_order"""
+        ).fetchall()
+        self.assertTrue(any(row[4] == "retired" for row in addresses_before))
+
+        # Recreate the v6 global-unique address constraint and remove the v7 marker.
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute("BEGIN")
+        connection.execute("""CREATE TABLE spectral_object_addresses_v6 (
+            address_id INTEGER PRIMARY KEY,
+            object_id TEXT NOT NULL REFERENCES spectral_objects(object_id),
+            version INTEGER NOT NULL CHECK(version >= 1),
+            address_value TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL CHECK(status IN ('active', 'retired')),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(object_id, version)
+        )""")
+        connection.execute("""INSERT INTO spectral_object_addresses_v6
+            SELECT address_id, object_id, version, address_value, status, created_at
+            FROM spectral_object_addresses""")
+        connection.execute("""CREATE TABLE spectral_object_address_segments_v6 (
+            address_id INTEGER NOT NULL REFERENCES spectral_object_addresses_v6(address_id) ON DELETE CASCADE,
+            segment_order INTEGER NOT NULL CHECK(segment_order >= 0),
+            object_id TEXT NOT NULL REFERENCES spectral_objects(object_id),
+            index_node_id TEXT NOT NULL REFERENCES spectral_index_nodes(node_id),
+            PRIMARY KEY(address_id, segment_order),
+            UNIQUE(address_id, object_id)
+        )""")
+        connection.execute("""INSERT INTO spectral_object_address_segments_v6
+            SELECT address_id, segment_order, object_id, index_node_id
+            FROM spectral_object_address_segments""")
+        connection.execute("DROP TABLE spectral_object_address_segments")
+        connection.execute("DROP TABLE spectral_object_addresses")
+        connection.execute("ALTER TABLE spectral_object_addresses_v6 RENAME TO spectral_object_addresses")
+        connection.execute("ALTER TABLE spectral_object_address_segments_v6 RENAME TO spectral_object_address_segments")
+        connection.execute("""CREATE UNIQUE INDEX spectral_object_one_active_address
+            ON spectral_object_addresses(object_id) WHERE status = 'active'""")
+        connection.execute("DELETE FROM spectral_schema_migrations WHERE version = 7")
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = ON")
+
+        upgraded = type(objects)(connection, self.geometry)
+        addresses_after = connection.execute(
+            """SELECT address_id, object_id, version, address_value, status
+               FROM spectral_object_addresses ORDER BY address_id"""
+        ).fetchall()
+        segments_after = connection.execute(
+            """SELECT address_id, segment_order, object_id, index_node_id
+               FROM spectral_object_address_segments
+               ORDER BY address_id, segment_order"""
+        ).fetchall()
+        self.assertEqual(addresses_after, addresses_before)
+        self.assertEqual(segments_after, segments_before)
+        self.assertEqual(upgraded.resolve_address(
+            upgraded.get_object("upgrade-child")["address"]
+        )["hierarchy"][-1]["object_id"], "upgrade-child")
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+        self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertEqual(connection.execute(
+            "SELECT version FROM spectral_schema_migrations WHERE version = 7"
+        ).fetchone(), (7,))
+
+    def test_roots_returns_top_level_objects_and_children_requires_parent_id(self):
+        objects = self.db.spectral_objects
+        objects.create_object("root-b", "domain", "B", "SC04-G00:", hierarchy_order=2)
+        objects.create_object("root-a", "domain", "A", "SC03-G00:", hierarchy_order=1)
+        objects.create_object("root-child", "section", "Child", "SC05-G00:", "root-a")
+        self.assertEqual([item["object_id"] for item in objects.roots()],
+                         ["root-a", "root-b"])
+        self.assertEqual([item["object_id"] for item in objects.children("root-a")],
+                         ["root-child"])
+        with self.assertRaises(ValueError):
+            objects.children(None)
+
+    def test_object_affine_transform_returns_exact_coordinates_without_mutating_source(self):
+        objects = self.db.spectral_objects
+        objects.create_object("transformed-object", "site", "Site", "SC03-G01:")
+        self.geometry.create_coordinate_system(
+            "object-transform-3d", "Object transform 3D", ["x", "y", "z"], "unit")
+        objects.set_coordinates("transformed-object", "object-transform-3d",
+                                [Fraction(1, 3), 2, Fraction(1, 2 ** 90)])
+        self.geometry.create_affine_transform(
+            "object-affine-3d", "object-transform-3d",
+            [[2, 0, 0], [0, 3, 0], [0, 0, Fraction(1, 2)]],
+            [Fraction(1, 3), -1, 0])
+        transformed = objects.apply_transform_to_object(
+            "transformed-object", "object-affine-3d")
+        self.assertEqual(transformed["coordinates"], [
+            {"axis": "x", "numerator": 1, "denominator": 1},
+            {"axis": "y", "numerator": 5, "denominator": 1},
+            {"axis": "z", "numerator": 1, "denominator": 2 ** 91},
+        ])
+        self.assertEqual(objects.get_coordinates(
+            "transformed-object", "object-transform-3d"), [
+            {"axis": "x", "numerator": 1, "denominator": 3},
+            {"axis": "y", "numerator": 2, "denominator": 1},
+            {"axis": "z", "numerator": 1, "denominator": 2 ** 90},
+        ])
+        with self.assertRaises(KeyError):
+            objects.apply_transform_to_object("transformed-object", "missing-transform")
+
     def test_reparent_order_only_change_does_not_create_address_version(self):
         objects = self.db.spectral_objects
         objects.create_object("reorder-parent", "domain", "Parent", "SC03-G00:")

@@ -466,6 +466,37 @@ class SpectralExtensionStore:
             if owns:
                 db.commit()
             raise ValueError("snapshot recovery cannot recreate deleted object identities without an explicit identity policy")
+        if snapshot["root_object_id"] is not None:
+            snapshot_root = next((row for row in rows if row[0] == snapshot["root_object_id"]), None)
+            if snapshot_root is None:
+                raise RuntimeError("scoped snapshot does not contain its declared root object")
+            expected_parent = snapshot_root[3]
+            if expected_parent is not None:
+                if db.execute(
+                    "SELECT 1 FROM spectral_objects WHERE object_id = ?", (expected_parent,)
+                ).fetchone() is None:
+                    report = {"reason": "external_ancestor_missing", "parent_object_id": expected_parent}
+                    self._record_event(snapshot_id, "recovery_rejected", report)
+                    if owns:
+                        db.commit()
+                    raise ValueError("scoped snapshot recovery requires its external parent to exist")
+                current_prefix = self.objects._compose_address(
+                    self.objects._parent_chain(expected_parent)
+                )
+                expected_prefix = snapshot_root[6].rsplit("/", 1)[0] if "/" in snapshot_root[6] else ""
+                if current_prefix != expected_prefix:
+                    report = {
+                        "reason": "external_ancestor_context_changed",
+                        "parent_object_id": expected_parent,
+                        "expected_prefix": expected_prefix,
+                        "actual_prefix": current_prefix,
+                    }
+                    self._record_event(snapshot_id, "recovery_rejected", report)
+                    if owns:
+                        db.commit()
+                    raise ValueError(
+                        "scoped snapshot cannot restore addresses because its external ancestor context changed"
+                    )
         before = self.compare_hierarchy_snapshot(snapshot_id)
         db.execute("SAVEPOINT restore_hierarchy_snapshot")
         try:

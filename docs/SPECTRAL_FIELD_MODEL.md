@@ -49,17 +49,32 @@ The interval endpoints are stored as integer numerator/denominator pairs. Repeat
 
 Only the seven primary clusters create `spectral_components`. Component IDs are database identities and are not assumed to equal cluster numbers. The three service clusters never become mixing components. Mix coefficients attach to an index-node ID, including any recursively created child, and are stored as reduced exact rational numbers, never floating-point values. The database does not impose that coefficients sum to one; normalization is not assumed by this schema.
 
-## Coordinates and transformations
+## Coordinates and geometry
 
-The initial coordinate system is two-dimensional:
+Coordinate systems are dimension-independent. Each system declares an ordered list of two or more named axes; the initial field uses:
 
 - X = cluster column (zero-based);
 - Y = gradient row (zero-based).
 
-Coordinates are stored as exact rational pairs. Geometry transformations are versioned records and do not alter shade IDs. The schema can add axes and coordinate systems later without changing existing identities.
+The original `spectral_positions` table remains available for compatibility with existing two-dimensional consumers. Migration version 3 copies those values into `spectral_position_coordinates`, which stores one exact rational value per shade, coordinate system, and axis. New coordinate systems can define three or more dimensions without changing shade IDs or the initial 2D system.
+
+Coordinates are represented as integer numerator/denominator pairs. Integers, rational pairs, and exact fractions are accepted; floating-point coordinates are deliberately rejected to avoid rounding drift.
+
+Affine geometry transformations use the exact equation:
+
+`x' = Mx + b`
+
+where `M` is a square rational matrix and `b` is a rational offset vector. Scaling is represented by a diagonal matrix. Transform definitions are persisted in `geometry_transforms`; applying a transform calculates and returns derived coordinates without overwriting source coordinates. This keeps logical shade IDs and canonical positions stable. A transform can be evaluated for one shade or for all 100 field shades.
+
+The geometry API is available as `database.spectral_field.geometry`:
+- `create_coordinate_system(...)` defines an additional N-dimensional coordinate space.
+- `set_coordinates(...)` and `get_coordinates(...)` write/read exact positions.
+- `create_affine_transform(...)` stores a general exact affine transform.
+- `create_scale_transform(...)` stores an exact per-axis scale.
+- `apply_transform(...)` and `apply_transform_to_field(...)` calculate transformed coordinates without changing canonical positions.
 
 ## Migration and compatibility
 
-The field schema is additive and initialized automatically by `SpectralDatabase`. Existing endpoint data, packet receipts, and route-correction tables are not rewritten. The migration uses `CREATE TABLE IF NOT EXISTS`, idempotent seed inserts, and a compatibility upgrade that converts the earlier shade-level mix rows to root index-node rows without discarding their coefficients.
+The field schema is additive and initialized automatically by `SpectralDatabase`. Existing endpoint data, packet receipts, and route-correction tables are not rewritten. The migration uses idempotent schema creation and seed inserts, and a compatibility upgrade converts earlier shade-level mix rows to root index-node rows without discarding their coefficients. Geometry migration version 3 copies existing X/Y positions into the dimension-independent coordinate table.
 
 This milestone only establishes the spectral database model. It does not implement network routing, a meta-router, the adder, physical photonic operations, or the future guard network.

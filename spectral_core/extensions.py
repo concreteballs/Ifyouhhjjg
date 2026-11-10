@@ -336,13 +336,38 @@ class SpectralExtensionStore:
             raise KeyError("hierarchy snapshot does not exist")
         return dict(zip(("snapshot_id", "root_object_id", "object_count", "digest_sha256", "created_at"), row))
 
+    def verify_hierarchy_snapshot(self, snapshot_id):
+        snapshot = self.get_hierarchy_snapshot(snapshot_id)
+        rows = self.connection.execute(
+            """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
+                      index_node_id, address_value
+               FROM spectral_hierarchy_snapshot_objects
+               WHERE snapshot_id = ? ORDER BY object_id""", (snapshot_id,)).fetchall()
+        serial = [list(row) for row in rows]
+        actual_digest = hashlib.sha256(json.dumps(
+            serial, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+        actual_count = len(rows)
+        valid = (actual_count == snapshot["object_count"]
+                 and actual_digest == snapshot["digest_sha256"])
+        return {"snapshot_id": snapshot_id, "is_valid": valid,
+                "expected_count": snapshot["object_count"], "actual_count": actual_count,
+                "expected_digest": snapshot["digest_sha256"], "actual_digest": actual_digest}
+
     def compare_hierarchy_snapshot(self, snapshot_id):
-        self.get_hierarchy_snapshot(snapshot_id)
+        snapshot = self.get_hierarchy_snapshot(snapshot_id)
+        verification = self.verify_hierarchy_snapshot(snapshot_id)
         expected = {row[0]: row[1:] for row in self.connection.execute(
             """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
                       index_node_id, address_value
                FROM spectral_hierarchy_snapshot_objects WHERE snapshot_id = ?""", (snapshot_id,))}
-        actual = {row[0]: row[1:] for row in self._snapshot_rows()}
+        if snapshot["root_object_id"] is None:
+            live_rows = self._snapshot_rows()
+        else:
+            try:
+                live_rows = self._snapshot_rows(snapshot["root_object_id"])
+            except KeyError:
+                live_rows = []
+        actual = {row[0]: row[1:] for row in live_rows}
         added = sorted(set(actual) - set(expected))
         missing = sorted(set(expected) - set(actual))
         changed = []
@@ -354,7 +379,8 @@ class SpectralExtensionStore:
                                 "fields": [fields[i] for i, pair in enumerate(zip(expected[object_id], actual[object_id]))
                                            if pair[0] != pair[1]]})
         report = {"snapshot_id": snapshot_id, "added": added, "missing": missing,
-                  "changed": changed, "is_consistent": not (added or missing or changed)}
+                  "changed": changed, "snapshot_valid": verification["is_valid"],
+                  "is_consistent": verification["is_valid"] and not (added or missing or changed)}
         self._record_event(snapshot_id, "comparison", report)
         return report
 
@@ -373,7 +399,13 @@ class SpectralExtensionStore:
 
     def restore_hierarchy_snapshot(self, snapshot_id):
         """Restore captured attributes for extant objects; never delete later additions."""
-        self.get_hierarchy_snapshot(snapshot_id)
+        snapshot_integrity = self.verify_hierarchy_snapshot(snapshot_id)
+        if not snapshot_integrity["is_valid"]:
+            self._record_event(snapshot_id, "recovery_rejected",
+                               {"reason": "snapshot_checksum_mismatch",
+                                "verification": snapshot_integrity})
+            self.connection.commit()
+            raise ValueError("hierarchy snapshot checksum or object count is invalid")
         rows = self.connection.execute(
             """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
                       index_node_id, address_value

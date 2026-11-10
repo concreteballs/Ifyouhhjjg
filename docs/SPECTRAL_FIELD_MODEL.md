@@ -43,7 +43,7 @@ Each initial gradient cell has a root index interval represented by an exact rat
 - left half: append `0`;
 - right half: append `1`.
 
-The interval endpoints are stored as integer numerator/denominator pairs. Repeated subdivision therefore remains exact and is not limited to a fixed depth. Existing parent nodes and shade IDs are retained.
+The interval endpoints are stored as exact numerator/denominator pairs; both values are persisted as decimal `TEXT` and reconstructed as Python integers. Repeated subdivision therefore remains exact and is not limited to a fixed depth. Existing parent nodes and shade IDs are retained.
 
 ## Mixing
 
@@ -58,7 +58,7 @@ Coordinate systems are dimension-independent. Each system declares an ordered li
 
 The original `spectral_positions` table remains available for compatibility with existing two-dimensional consumers. Migration version 3 copies those values into `spectral_position_coordinates`, which stores one exact rational value per shade, coordinate system, and axis. New coordinate systems can define three or more dimensions without changing shade IDs or the initial 2D system.
 
-Coordinates are represented as integer numerator/denominator pairs. Integers, rational pairs, and exact fractions are accepted; floating-point coordinates are deliberately rejected to avoid rounding drift.
+Coordinates are represented as exact rational numerator/denominator pairs. Both values are persisted as decimal `TEXT` and returned by the API as Python integers. Integers, rational pairs, and exact fractions are accepted; floating-point coordinates are deliberately rejected to avoid rounding drift.
 
 Affine geometry transformations use the exact equation:
 

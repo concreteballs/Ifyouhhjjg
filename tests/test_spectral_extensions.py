@@ -82,6 +82,23 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
         self.assertEqual(self.objects.get_object("child")["name"], "Child")
         self.assertFalse(connection.in_transaction)
 
+    def test_scoped_recovery_rejects_changed_external_ancestor_context(self):
+        self.ext.create_hierarchy_snapshot("child-scope-1", root_object_id="child")
+        self.objects.update_index_node("root", "SC05-G00:")
+
+        with self.assertRaisesRegex(ValueError, "external ancestor context changed"):
+            self.ext.restore_hierarchy_snapshot("child-scope-1")
+
+        rejected = [
+            event for event in self.ext.integrity_events("child-scope-1")
+            if event["event_type"] == "recovery_rejected"
+        ]
+        self.assertTrue(rejected)
+        self.assertEqual(
+            rejected[-1]["details"]["reason"],
+            "external_ancestor_context_changed"
+        )
+
     def test_snapshot_detects_changes_and_recovery_restores_captured_state(self):
         self.ext.create_hierarchy_snapshot("baseline-1")
         self.objects.rename_object("child", "Changed child")

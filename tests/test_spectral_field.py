@@ -53,8 +53,14 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
             self.field.split_index("SC03-G00")
 
     def test_mixing_uses_only_seven_primary_components_and_exact_coefficients(self):
-        self.field.set_mix_component("SC03-G00:", 3, 2, 6)
-        self.field.set_mix_component("SC03-G00:", 4, 5, 7)
+        component3 = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+        ).fetchone()[0]
+        component4 = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 4"
+        ).fetchone()[0]
+        self.field.set_mix_component("SC03-G00:", component3, 2, 6)
+        self.field.set_mix_component("SC03-G00:", component4, 5, 7)
         self.assertEqual(
             self.field.mix_components("SC03-G00:"),
             [
@@ -64,15 +70,21 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         )
 
     def test_recursive_child_is_a_distinct_mixable_index_value(self):
+        component3 = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+        ).fetchone()[0]
         child = self.field.split_index("SC03-G00")[0]
-        self.field.set_mix_component(child["node_id"], 3, 1, 2)
+        self.field.set_mix_component(child["node_id"], component3, 1, 2)
         self.assertEqual(
             self.field.mix_components(child["node_id"])[0]["numerator"], 1
         )
 
     def test_service_shade_cannot_be_used_in_mixing(self):
+        component3 = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+        ).fetchone()[0]
         with self.assertRaises(PermissionError):
-            self.field.set_mix_component("SC01-G00:", 3, 1, 2)
+            self.field.set_mix_component("SC01-G00:", component3, 1, 2)
 
     def test_service_cluster_cannot_be_a_mixing_component(self):
         with self.assertRaises(KeyError):

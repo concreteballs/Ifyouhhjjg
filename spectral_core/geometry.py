@@ -44,7 +44,10 @@ class SpectralGeometryStore:
 
             # Version 5: generic coordinate rationals also use arbitrary-precision TEXT.
             coordinate_info = {row[1]: row[2].upper() for row in db.execute("PRAGMA table_info(spectral_position_coordinates)")}
-            if coordinate_info and coordinate_info.get("numerator") != "TEXT":
+            if coordinate_info and any(
+                coordinate_info.get(column) != "TEXT"
+                for column in ("numerator", "denominator")
+            ):
                 db.execute("ALTER TABLE spectral_position_coordinates RENAME TO spectral_position_coordinates_legacy_exact_v5")
                 db.execute("""CREATE TABLE spectral_position_coordinates (
                     shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),

@@ -46,6 +46,28 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(grandchildren[1]["lower"], (1, 40))
         self.assertEqual(grandchildren[1]["upper"], (1, 20))
 
+    def test_recursive_index_exceeds_sqlite_integer_limit_without_precision_loss(self):
+        path = "0"
+        for _ in range(70):
+            self.field.split_index("SC03-G00", path)
+            path += "0"
+        leaf = self.db.connection.execute(
+            "SELECT lower_numerator, lower_denominator, upper_numerator, upper_denominator "
+            "FROM spectral_index_nodes WHERE shade_id = ? AND path = ?",
+            ("SC03-G00", path),
+        ).fetchone()
+        self.assertTrue(all(isinstance(value, str) for value in leaf))
+        self.assertGreater(len(leaf[1]), 19)
+        lower = Fraction(int(leaf[0]), int(leaf[1]))
+        upper = Fraction(int(leaf[2]), int(leaf[3]))
+        self.assertEqual(upper - lower, Fraction(1, 10 * (2 ** 70)))
+        component_id = self.db.connection.execute(
+            "SELECT component_id FROM spectral_components WHERE cluster_id = 3"
+        ).fetchone()[0]
+        self.field.set_mix_component(f"SC03-G00:{path}", component_id, 1, 2 ** 80)
+        self.assertEqual(self.field.mix_components(f"SC03-G00:{path}")[0]["denominator"], 2 ** 80)
+        self.assertEqual(self.db.connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+
     def test_service_zone_index_cannot_be_subdivided_for_mixing(self):
         for shade_id in ("SC01-G00", "SC02-G00", "SC10-G00"):
             with self.assertRaises(PermissionError):
@@ -216,6 +238,7 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         connection.execute("INSERT INTO spectral_components(cluster_id, component_key) VALUES (3, 'cluster-03')")
         connection.execute("INSERT INTO spectral_shades VALUES ('SC03-G00', 3, 3, 0)")
         connection.execute("INSERT INTO spectral_mix_components VALUES ('SC03-G00', 1, 2, 6)")
+        connection.commit()
         from spectral_core.spectral_field import SpectralFieldStore
         field = SpectralFieldStore(connection)
         migrated = field.mix_components("SC03-G00:")
@@ -226,6 +249,8 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(connection.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='spectral_mix_components_legacy_v1'"
         ).fetchone()[0], 0)
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+        self.assertEqual(connection.execute("PRAGMA table_info(spectral_index_nodes)").fetchall()[6][2].upper(), "TEXT")
         connection.close()
 
     def test_existing_two_dimensional_positions_are_migrated_to_generic_axes(self):

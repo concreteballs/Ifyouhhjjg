@@ -608,5 +608,114 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
 
 
 
+
+    def test_independent_branches_and_shared_leaf_component_resolve_separately(self):
+        objects = self.db.spectral_objects
+        objects.create_object("branch-a", "domain", "A", "SC03-G00:")
+        objects.create_object("branch-b", "domain", "B", "SC04-G00:")
+        objects.create_object("branch-a-leaf", "page", "Leaf A", "SC05-G01:", "branch-a")
+        objects.create_object("branch-b-leaf", "page", "Leaf B", "SC05-G01:", "branch-b")
+        a = objects.get_object("branch-a-leaf")["address"]
+        b = objects.get_object("branch-b-leaf")["address"]
+        self.assertNotEqual(a, b)
+        self.assertEqual(objects.resolve_address(a)["hierarchy"][-1]["object_id"], "branch-a-leaf")
+        self.assertEqual(objects.resolve_address(b)["hierarchy"][-1]["object_id"], "branch-b-leaf")
+
+    def test_deep_hierarchy_and_recursive_index_paths_resolve(self):
+        objects = self.db.spectral_objects
+        self.field.split_index("SC03-G00")
+        self.field.split_index("SC03-G00", "0")
+        self.field.split_index("SC03-G00", "00")
+        parent = None
+        for level in range(18):
+            object_id = f"deep-{level}"
+            objects.create_object(object_id, "level", f"Level {level}", "SC03-G00:000",
+                                  parent, level)
+            parent = object_id
+        address = objects.get_object("deep-17")["address"]
+        resolved = objects.resolve_address(address)
+        self.assertEqual(len(resolved["hierarchy"]), 18)
+        self.assertEqual(resolved["hierarchy"][0]["object_id"], "deep-0")
+        self.assertEqual(resolved["hierarchy"][-1]["object_id"], "deep-17")
+        self.assertTrue(address.endswith("B05-G00~000"))
+
+    def test_reusing_retired_address_is_allowed_but_active_collision_is_not(self):
+        objects = self.db.spectral_objects
+        objects.create_object("reusable", "domain", "Reusable", "SC03-G00:")
+        old = objects.get_object("reusable")["address"]
+        objects.update_index_node("reusable", "SC04-G00:")
+        objects.update_index_node("reusable", "SC03-G00:")
+        self.assertEqual(objects.get_object("reusable")["address"], old)
+        self.assertEqual(objects.resolve_address(old)["object_id"], "reusable")
+        with self.assertRaises(sqlite3.IntegrityError):
+            objects.create_object("collision", "domain", "Collision", "SC03-G00:")
+
+    def test_reparent_versions_subtree_and_rejects_cycles(self):
+        objects = self.db.spectral_objects
+        objects.create_object("move-root-a", "domain", "A", "SC03-G00:")
+        objects.create_object("move-root-b", "domain", "B", "SC04-G00:")
+        objects.create_object("move-child", "section", "Child", "SC05-G00:", "move-root-a")
+        objects.create_object("move-leaf", "page", "Leaf", "SC06-G00:", "move-child")
+        old_leaf = objects.get_object("move-leaf")["address"]
+        moved = objects.reparent_object("move-child", "move-root-b", 4)
+        self.assertEqual(moved["parent_object_id"], "move-root-b")
+        new_leaf = objects.get_object("move-leaf")["address"]
+        self.assertNotEqual(old_leaf, new_leaf)
+        with self.assertRaises(KeyError):
+            objects.resolve_address(old_leaf)
+        self.assertEqual(objects.resolve_address(new_leaf)["hierarchy"][-1]["object_id"], "move-leaf")
+        with self.assertRaises(ValueError):
+            objects.reparent_object("move-root-b", "move-leaf")
+        self.assertEqual(objects.get_object("move-child")["parent_object_id"], "move-root-b")
+
+    def test_rename_and_sibling_reorder_do_not_change_addresses(self):
+        objects = self.db.spectral_objects
+        objects.create_object("order-parent", "domain", "Parent", "SC03-G00:")
+        objects.create_object("order-one", "section", "One", "SC04-G00:", "order-parent", 1)
+        objects.create_object("order-two", "section", "Two", "SC05-G00:", "order-parent", 2)
+        before = objects.get_object("order-one")["address"]
+        objects.rename_object("order-one", "Renamed")
+        objects.reorder_object("order-one", 3)
+        self.assertEqual(objects.get_object("order-one")["name"], "Renamed")
+        self.assertEqual(objects.get_object("order-one")["hierarchy_order"], 3)
+        self.assertEqual(objects.get_object("order-one")["address"], before)
+        self.assertEqual([x["object_id"] for x in objects.children("order-parent")],
+                         ["order-two", "order-one"])
+
+    def test_active_address_resolution_detects_stale_snapshot_index(self):
+        objects = self.db.spectral_objects
+        objects.create_object("integrity-root", "domain", "Root", "SC03-G00:")
+        objects.update_index_node("integrity-root", "SC04-G00:")
+        active_id = self.db.connection.execute(
+            "SELECT address_id FROM spectral_object_addresses WHERE object_id = ? AND status = 'active'",
+            ("integrity-root",)
+        ).fetchone()[0]
+        self.db.connection.execute(
+            "UPDATE spectral_object_address_segments SET index_node_id = ? WHERE address_id = ?",
+            ("SC03-G00:", active_id)
+        )
+        with self.assertRaises(RuntimeError):
+            objects.resolve_address(objects.get_object("integrity-root")["address"])
+
+    def test_migration_v7_preserves_foreign_keys_and_active_address_index(self):
+        self.assertEqual(self.db.connection.execute(
+            "SELECT version FROM spectral_schema_migrations WHERE version = 7"
+        ).fetchone(), (7,))
+        indexes = {row[1] for row in self.db.connection.execute(
+            "PRAGMA index_list(spectral_object_addresses)"
+        )}
+        self.assertIn("spectral_object_active_address_value", indexes)
+        self.assertEqual(self.db.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_reparent_order_only_change_does_not_create_address_version(self):
+        objects = self.db.spectral_objects
+        objects.create_object("reorder-parent", "domain", "Parent", "SC03-G00:")
+        objects.create_object("reorder-child", "section", "Child", "SC04-G00:", "reorder-parent", 1)
+        before = objects.get_object("reorder-child")
+        after = objects.reparent_object("reorder-child", "reorder-parent", 9)
+        self.assertEqual(after["address"], before["address"])
+        self.assertEqual(after["address_version"], before["address_version"])
+        self.assertEqual(after["hierarchy_order"], 9)
+
 if __name__ == "__main__":
     unittest.main()

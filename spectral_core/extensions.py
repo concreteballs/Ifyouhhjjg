@@ -104,6 +104,25 @@ class SpectralExtensionStore:
                     details_json TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )""",
+                """CREATE TABLE IF NOT EXISTS spectral_reserved_region_lines (
+                    region_id TEXT PRIMARY KEY REFERENCES spectral_reserved_regions(region_id),
+                    cluster_id INTEGER NOT NULL UNIQUE REFERENCES spectral_clusters(cluster_id),
+                    coverage TEXT NOT NULL DEFAULT 'full_line'
+                        CHECK(coverage = 'full_line'),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )""",
+                """CREATE TRIGGER IF NOT EXISTS spectral_reserved_line_service_insert
+                   BEFORE INSERT ON spectral_reserved_region_lines
+                   WHEN (SELECT role FROM spectral_clusters WHERE cluster_id = NEW.cluster_id) <> 'service'
+                   BEGIN
+                       SELECT RAISE(ABORT, 'only service clusters can be reserved as full service lines');
+                   END""",
+                """CREATE TRIGGER IF NOT EXISTS spectral_reserved_line_service_update
+                   BEFORE UPDATE OF cluster_id ON spectral_reserved_region_lines
+                   WHEN (SELECT role FROM spectral_clusters WHERE cluster_id = NEW.cluster_id) <> 'service'
+                   BEGIN
+                       SELECT RAISE(ABORT, 'only service clusters can be reserved as full service lines');
+                   END""",
             )
             for statement in statements:
                 db.execute(statement)
@@ -118,6 +137,28 @@ class SpectralExtensionStore:
                        CHECK(digest_version IN (1, 2))"""
                 )
             db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (9)")
+            service_lines = (
+                (1, "service-line-01", "Service line 1"),
+                (2, "service-line-02", "Service line 2"),
+                (10, "service-line-10", "Service line 10"),
+            )
+            for cluster_order, region_id, name in service_lines:
+                db.execute(
+                    """INSERT OR IGNORE INTO spectral_reserved_regions
+                       (region_id, region_type, name, description, status, metadata_json)
+                       VALUES (?, 'reserved', ?, ?, 'reserved', ?)""",
+                    (region_id, name,
+                     f"Entire spectral line for service cluster {cluster_order}; all ten gradient cells are reserved.",
+                     self._json({"cluster_order": cluster_order, "coverage": "full_line"}))
+                )
+                db.execute(
+                    """INSERT OR IGNORE INTO spectral_reserved_region_lines
+                       (region_id, cluster_id, coverage)
+                       SELECT ?, cluster_id, 'full_line' FROM spectral_clusters
+                       WHERE cluster_order = ? AND role = 'service'""",
+                    (region_id, cluster_order)
+                )
+            db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (10)")
             violations = db.execute("PRAGMA foreign_key_check").fetchall()
             if violations:
                 raise RuntimeError(f"foreign-key violations after extension migration: {violations[:5]}")
@@ -188,6 +229,64 @@ class SpectralExtensionStore:
             raise KeyError("reserved region does not exist")
         return dict(zip(("region_id", "region_type", "name", "description", "status", "metadata"), 
                         (*row[:5], json.loads(row[5]))))
+
+    def bind_reserved_region_to_line(self, region_id, cluster_order):
+        """Bind a reserved region to one complete service-cluster line."""
+        region_id = self._required(region_id, "region_id")
+        if isinstance(cluster_order, bool) or not isinstance(cluster_order, int):
+            raise ValueError("cluster_order must be an integer")
+        if self.connection.execute(
+                "SELECT 1 FROM spectral_reserved_regions WHERE region_id = ?",
+                (region_id,)).fetchone() is None:
+            raise KeyError("reserved region does not exist")
+        cluster = self.connection.execute(
+            "SELECT cluster_id, role FROM spectral_clusters WHERE cluster_order = ?",
+            (cluster_order,)).fetchone()
+        if cluster is None:
+            raise KeyError("spectral cluster does not exist")
+        if cluster[1] != "service":
+            raise ValueError("only service clusters can be bound as reserved full lines")
+        owns = not self.connection.in_transaction
+        self.connection.execute(
+            """INSERT INTO spectral_reserved_region_lines
+               (region_id, cluster_id, coverage) VALUES (?, ?, 'full_line')""",
+            (region_id, cluster[0]))
+        if owns:
+            self.connection.commit()
+        return self.get_reserved_line(cluster_order)
+
+    def get_reserved_line(self, cluster_order):
+        row = self.connection.execute(
+            """SELECT r.region_id, r.region_type, r.name, r.description, r.status,
+                      c.cluster_id, c.cluster_order, c.designation, l.coverage,
+                      COUNT(s.shade_id) AS shade_count
+               FROM spectral_reserved_region_lines l
+               JOIN spectral_reserved_regions r ON r.region_id = l.region_id
+               JOIN spectral_clusters c ON c.cluster_id = l.cluster_id
+               LEFT JOIN spectral_shades s ON s.cluster_id = c.cluster_id
+               WHERE c.cluster_order = ?
+               GROUP BY r.region_id, c.cluster_id""",
+            (cluster_order,)).fetchone()
+        if row is None:
+            raise KeyError("reserved full line does not exist")
+        keys = ("region_id", "region_type", "name", "description", "status",
+                "cluster_id", "cluster_order", "designation", "coverage", "shade_count")
+        return dict(zip(keys, row))
+
+    def reserved_lines(self):
+        rows = self.connection.execute(
+            """SELECT c.cluster_order, c.designation, r.region_id, r.name,
+                      r.status, l.coverage, COUNT(s.shade_id) AS shade_count
+               FROM spectral_reserved_region_lines l
+               JOIN spectral_reserved_regions r ON r.region_id = l.region_id
+               JOIN spectral_clusters c ON c.cluster_id = l.cluster_id
+               LEFT JOIN spectral_shades s ON s.cluster_id = c.cluster_id
+               GROUP BY c.cluster_id
+               ORDER BY c.cluster_order"""
+        ).fetchall()
+        keys = ("cluster_order", "designation", "region_id", "name",
+                "status", "coverage", "shade_count")
+        return [dict(zip(keys, row)) for row in rows]
 
     def set_reserved_region_status(self, region_id, status):
         if status not in ("reserved", "planned", "released"):

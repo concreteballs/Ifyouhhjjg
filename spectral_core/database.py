@@ -10,6 +10,7 @@ from .address import SpectralAddress
 from .geometry import SpectralGeometryStore
 from .spectral_field import SpectralFieldStore
 from .objects import SpectralObjectStore
+from .extensions import SpectralExtensionStore
 
 
 class SpectralDatabase:
@@ -81,6 +82,8 @@ class SpectralDatabase:
         self.spectral_field.geometry = SpectralGeometryStore(self.connection)
         self.connection.commit()
         self.spectral_objects = SpectralObjectStore(self.connection, self.spectral_field.geometry)
+        self.connection.commit()
+        self.spectral_extensions = SpectralExtensionStore(self.connection, self.spectral_objects)
         self.connection.commit()
         self._secure_sqlite_files()
 

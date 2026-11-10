@@ -73,6 +73,46 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
         events = self.ext.integrity_events("baseline-1")
         self.assertIn("recovery_completed", [event["event_type"] for event in events])
 
+    def test_scoped_snapshot_ignores_objects_outside_its_subtree(self):
+        self.objects.create_object("other-root", "domain", "Other root", "SC06-G00:")
+        self.ext.create_hierarchy_snapshot("scoped-1", root_object_id="root")
+        self.objects.rename_object("other-root", "Changed outside")
+        self.objects.create_object("unrelated", "domain", "Unrelated", "SC07-G00:")
+
+        report = self.ext.compare_hierarchy_snapshot("scoped-1")
+        self.assertTrue(report["is_consistent"])
+        self.assertEqual(report["added"], [])
+        self.assertEqual(report["changed"], [])
+
+        self.objects.create_object("nested", "page", "Nested", "SC08-G00:", "child")
+        report = self.ext.compare_hierarchy_snapshot("scoped-1")
+        self.assertEqual(report["added"], ["nested"])
+        self.assertFalse(report["is_consistent"])
+
+    def test_snapshot_checksum_is_verified_and_corruption_blocks_recovery(self):
+        self.ext.create_hierarchy_snapshot("checksum-1")
+        valid = self.ext.verify_hierarchy_snapshot("checksum-1")
+        self.assertTrue(valid["is_valid"])
+        self.assertEqual(valid["expected_count"], valid["actual_count"])
+
+        self.db.connection.execute(
+            "UPDATE spectral_hierarchy_snapshot_objects SET name = ? "
+            "WHERE snapshot_id = ? AND object_id = ?",
+            ("Tampered snapshot", "checksum-1", "child"))
+        self.db.connection.commit()
+
+        invalid = self.ext.verify_hierarchy_snapshot("checksum-1")
+        self.assertFalse(invalid["is_valid"])
+        report = self.ext.compare_hierarchy_snapshot("checksum-1")
+        self.assertFalse(report["snapshot_valid"])
+        self.assertFalse(report["is_consistent"])
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            self.ext.restore_hierarchy_snapshot("checksum-1")
+        self.assertIn(
+            "recovery_rejected",
+            [event["event_type"] for event in self.ext.integrity_events("checksum-1")]
+        )
+
     def test_snapshot_recovery_refuses_to_silently_recreate_missing_identity(self):
         self.ext.create_hierarchy_snapshot("baseline-2")
         self.db.connection.execute("DELETE FROM spectral_object_addresses WHERE object_id = 'child'")

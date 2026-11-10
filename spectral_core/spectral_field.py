@@ -45,6 +45,7 @@ class SpectralFieldStore:
 
     def _migrate_and_seed(self):
         db = self.connection
+        db.execute("PRAGMA foreign_keys = ON")
         db.execute("SAVEPOINT spectral_field_v1")
         try:
             statements = (
@@ -63,9 +64,10 @@ class SpectralFieldStore:
                     standard_band_number INTEGER,
                     role TEXT NOT NULL CHECK(role IN ('primary', 'service')),
                     mixing_enabled INTEGER NOT NULL CHECK(mixing_enabled IN (0, 1)),
+                    visual_order INTEGER UNIQUE CHECK(visual_order BETWEEN 1 AND 7),
                     source_note TEXT NOT NULL,
-                    CHECK((role = 'primary' AND mixing_enabled = 1) OR
-                          (role = 'service' AND mixing_enabled = 0))
+                    CHECK((role = 'primary' AND mixing_enabled = 1 AND visual_order IS NOT NULL) OR
+                          (role = 'service' AND mixing_enabled = 0 AND visual_order IS NULL))
                 )""",
                 """CREATE TABLE IF NOT EXISTS spectral_components (
                     component_id INTEGER PRIMARY KEY,
@@ -88,11 +90,11 @@ class SpectralFieldStore:
                     PRIMARY KEY(palette_version_id, shade_id)
                 )""",
                 """CREATE TABLE IF NOT EXISTS spectral_mix_components (
-                    shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+                    index_node_id TEXT NOT NULL REFERENCES spectral_index_nodes(node_id),
                     component_id INTEGER NOT NULL REFERENCES spectral_components(component_id),
                     coefficient_numerator INTEGER NOT NULL CHECK(coefficient_numerator >= 0),
                     coefficient_denominator INTEGER NOT NULL CHECK(coefficient_denominator > 0),
-                    PRIMARY KEY(shade_id, component_id)
+                    PRIMARY KEY(index_node_id, component_id)
                 )""",
                 """CREATE TABLE IF NOT EXISTS coordinate_systems (
                     coordinate_system_id TEXT PRIMARY KEY,
@@ -156,9 +158,10 @@ class SpectralFieldStore:
                 db.execute(
                     """INSERT OR IGNORE INTO spectral_clusters
                        (cluster_id, cluster_order, designation, lower_hz, upper_hz,
-                        standard_band_number, role, mixing_enabled, source_note)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (order, order, designation, lower, upper, band_no, role, mixing, note),
+                        standard_band_number, role, mixing_enabled, visual_order, source_note)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (order, order, designation, lower, upper, band_no, role, mixing,
+                     order - 2 if role == "primary" else None, note),
                 )
                 if mixing:
                     db.execute(
@@ -280,7 +283,7 @@ class SpectralFieldStore:
             db.execute("RELEASE SAVEPOINT split_spectral_index")
             raise
 
-    def set_mix_component(self, shade_id: str, component_id: int,
+    def set_mix_component(self, index_node_id: str, component_id: int,
                           numerator: int, denominator: int):
         """Store an exact non-negative rational coefficient without forced normalization."""
         if isinstance(numerator, bool) or not isinstance(numerator, int) or numerator < 0:
@@ -289,10 +292,11 @@ class SpectralFieldStore:
             raise ValueError("denominator must be a positive integer")
         fraction = Fraction(numerator, denominator)
         row = self.connection.execute(
-            """SELECT c.mixing_enabled FROM spectral_shades s
+            """SELECT c.mixing_enabled FROM spectral_index_nodes n
+               JOIN spectral_shades s ON s.shade_id = n.shade_id
                JOIN spectral_clusters c ON c.cluster_id = s.cluster_id
-               WHERE s.shade_id = ?""",
-            (shade_id,),
+               WHERE n.node_id = ?""",
+            (index_node_id,),
         ).fetchone()
         if row is None:
             raise KeyError("shade does not exist")
@@ -310,23 +314,23 @@ class SpectralFieldStore:
             raise PermissionError("service clusters cannot participate in mixing")
         self.connection.execute(
             """INSERT INTO spectral_mix_components
-               (shade_id, component_id, coefficient_numerator, coefficient_denominator)
+               (index_node_id, component_id, coefficient_numerator, coefficient_denominator)
                VALUES (?, ?, ?, ?)
-               ON CONFLICT(shade_id, component_id) DO UPDATE SET
+               ON CONFLICT(index_node_id, component_id) DO UPDATE SET
                  coefficient_numerator = excluded.coefficient_numerator,
                  coefficient_denominator = excluded.coefficient_denominator""",
-            (shade_id, component_id, fraction.numerator, fraction.denominator),
+            (index_node_id, component_id, fraction.numerator, fraction.denominator),
         )
         self.connection.commit()
 
-    def mix_components(self, shade_id: str) -> List[Dict]:
+    def mix_components(self, index_node_id: str) -> List[Dict]:
         rows = self.connection.execute(
             """SELECT p.component_id, p.component_key, m.coefficient_numerator,
                       m.coefficient_denominator
                FROM spectral_mix_components m
                JOIN spectral_components p ON p.component_id = m.component_id
-               WHERE m.shade_id = ? ORDER BY p.component_id""",
-            (shade_id,),
+               WHERE m.index_node_id = ? ORDER BY p.component_id""",
+            (index_node_id,),
         ).fetchall()
         return [
             {"component_id": row[0], "component_key": row[1],

@@ -215,11 +215,11 @@ class SpectralFieldStore:
             raise
 
     def clusters(self) -> List[Dict]:
-        self.connection.row_factory = sqlite3.Row
-        rows = self.connection.execute(
+        cursor = self.connection.execute(
             "SELECT * FROM spectral_clusters ORDER BY cluster_order"
-        ).fetchall()
-        return [dict(row) for row in rows]
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def split_index(self, shade_id: str, path: str = "") -> List[Dict]:
         """Split one existing interval into two exact equal rational halves."""

@@ -47,7 +47,7 @@ The interval endpoints are stored as integer numerator/denominator pairs. Repeat
 
 ## Mixing
 
-Only the seven primary clusters create `spectral_components`. The three service clusters never become mixing components. Mix coefficients are stored as reduced exact rational numbers, never floating-point values. The database does not impose that coefficients sum to one; normalization is not assumed by this schema.
+Only the seven primary clusters create `spectral_components`. The three service clusters never become mixing components. Mix coefficients attach to an index-node ID, including any recursively created child, and are stored as reduced exact rational numbers, never floating-point values. The database does not impose that coefficients sum to one; normalization is not assumed by this schema.
 
 ## Coordinates and transformations
 

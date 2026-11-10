@@ -1,5 +1,5 @@
+import sqlite3
 import unittest
-from fractions import Fraction
 
 from spectral_core import SpectralDatabase
 
@@ -102,6 +102,84 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
                WHERE shade_id = 'SC03-G00'"""
         ).fetchone()
         self.assertEqual(row, (None, None))
+
+
+    def test_upgrade_preserves_earlier_mix_rows_as_root_index_values(self):
+        connection = sqlite3.connect(":memory:")
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("""CREATE TABLE spectral_clusters (
+            cluster_id INTEGER PRIMARY KEY,
+            cluster_order INTEGER NOT NULL UNIQUE,
+            designation TEXT NOT NULL UNIQUE,
+            lower_hz INTEGER NOT NULL,
+            upper_hz INTEGER NOT NULL,
+            standard_band_number INTEGER,
+            role TEXT NOT NULL,
+            mixing_enabled INTEGER NOT NULL,
+            source_note TEXT NOT NULL
+        )""")
+        connection.execute("""CREATE TABLE spectral_components (
+            component_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cluster_id INTEGER NOT NULL UNIQUE REFERENCES spectral_clusters(cluster_id),
+            component_key TEXT NOT NULL UNIQUE
+        )""")
+        connection.execute("""CREATE TABLE spectral_shades (
+            shade_id TEXT PRIMARY KEY,
+            cluster_id INTEGER NOT NULL REFERENCES spectral_clusters(cluster_id),
+            grid_column INTEGER NOT NULL,
+            grid_row INTEGER NOT NULL,
+            UNIQUE(cluster_id, grid_row),
+            UNIQUE(grid_column, grid_row)
+        )""")
+        connection.execute("""CREATE TABLE spectral_index_nodes (
+            node_id TEXT PRIMARY KEY,
+            shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+            parent_node_id TEXT REFERENCES spectral_index_nodes(node_id),
+            branch TEXT NOT NULL,
+            path TEXT NOT NULL,
+            depth INTEGER NOT NULL,
+            lower_numerator INTEGER NOT NULL,
+            lower_denominator INTEGER NOT NULL,
+            upper_numerator INTEGER NOT NULL,
+            upper_denominator INTEGER NOT NULL,
+            UNIQUE(shade_id, path)
+        )""")
+        connection.execute("""CREATE TABLE spectral_mix_components (
+            shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
+            component_id INTEGER NOT NULL REFERENCES spectral_components(component_id),
+            coefficient_numerator INTEGER NOT NULL,
+            coefficient_denominator INTEGER NOT NULL,
+            PRIMARY KEY(shade_id, component_id)
+        )""")
+        connection.execute(
+            """INSERT INTO spectral_clusters
+               VALUES (3, 3, 'LF', 30000, 300000, 5, 'primary', 1, 'legacy')"""
+        )
+        connection.execute(
+            "INSERT INTO spectral_components(cluster_id, component_key) VALUES (3, 'cluster-03')"
+        )
+        connection.execute(
+            "INSERT INTO spectral_shades VALUES ('SC03-G00', 3, 3, 0)"
+        )
+        connection.execute(
+            "INSERT INTO spectral_mix_components VALUES ('SC03-G00', 1, 2, 6)"
+        )
+        from spectral_core.spectral_field import SpectralFieldStore
+        field = SpectralFieldStore(connection)
+        migrated = field.mix_components("SC03-G00:")
+        self.assertEqual(migrated[0]["numerator"], 2)
+        self.assertEqual(migrated[0]["denominator"], 6)
+        self.assertEqual(
+            connection.execute("PRAGMA table_info(spectral_mix_components)").fetchall()[0][1],
+            "index_node_id",
+        )
+        self.assertEqual(
+            connection.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='spectral_mix_components_legacy_v1'"
+            ).fetchone()[0],
+            0,
+        )
+        connection.close()
 
 
 if __name__ == "__main__":

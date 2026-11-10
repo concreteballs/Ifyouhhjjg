@@ -179,6 +179,74 @@ class SpectralObjectStore:
                 db.rollback()
             raise
 
+    def update_index_node(self, object_id, index_node_id):
+        """Change one object's spectral component and version all affected descendant addresses."""
+        self._required(object_id, "object_id")
+        self._index_component(index_node_id)
+        db = self.connection
+        if db.execute("SELECT index_node_id FROM spectral_objects WHERE object_id = ?",
+                      (object_id,)).fetchone() is None:
+            raise KeyError("object does not exist")
+        if db.execute("SELECT index_node_id FROM spectral_objects WHERE object_id = ?",
+                      (object_id,)).fetchone()[0] == index_node_id:
+            return self.get_object(object_id)
+
+        owns = not db.in_transaction
+        db.execute("SAVEPOINT update_object_index")
+        try:
+            db.execute(
+                "UPDATE spectral_objects SET index_node_id = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
+                (index_node_id, object_id)
+            )
+            affected = []
+            queue = [object_id]
+            while queue:
+                current = queue.pop(0)
+                affected.append(current)
+                queue.extend(row[0] for row in db.execute(
+                    "SELECT object_id FROM spectral_objects WHERE parent_object_id = ? "
+                    "ORDER BY hierarchy_order, object_id", (current,)
+                ).fetchall())
+
+            # Retire snapshots first so the active-address uniqueness constraint
+            # is checked against the final, complete replacement set.
+            placeholders = ",".join("?" for _ in affected)
+            db.execute(
+                f"UPDATE spectral_object_addresses SET status = 'retired' "
+                f"WHERE status = 'active' AND object_id IN ({placeholders})",
+                affected
+            )
+            for current in affected:
+                chain = self._parent_chain(current)
+                address_value = self._compose_address(chain)
+                version = db.execute(
+                    "SELECT COALESCE(MAX(version), 0) + 1 FROM spectral_object_addresses WHERE object_id = ?",
+                    (current,)
+                ).fetchone()[0]
+                cursor = db.execute(
+                    """INSERT INTO spectral_object_addresses
+                       (object_id, version, address_value, status)
+                       VALUES (?, ?, ?, 'active')""",
+                    (current, version, address_value)
+                )
+                db.executemany(
+                    """INSERT INTO spectral_object_address_segments
+                       (address_id, segment_order, object_id, index_node_id)
+                       VALUES (?, ?, ?, ?)""",
+                    [(cursor.lastrowid, i, row[0], row[2])
+                     for i, row in enumerate(chain)]
+                )
+            db.execute("RELEASE SAVEPOINT update_object_index")
+            if owns:
+                db.commit()
+            return self.get_object(object_id)
+        except Exception:
+            db.execute("ROLLBACK TO SAVEPOINT update_object_index")
+            db.execute("RELEASE SAVEPOINT update_object_index")
+            if owns:
+                db.rollback()
+            raise
+
     def get_object(self, object_id):
         row = self.connection.execute(
             """SELECT o.object_id, o.object_type, o.name, o.parent_object_id,

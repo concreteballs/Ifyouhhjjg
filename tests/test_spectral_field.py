@@ -64,8 +64,8 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
         self.assertEqual(
             self.field.mix_components("SC03-G00:"),
             [
-                {"component_id": 3, "component_key": "cluster-03", "numerator": 1, "denominator": 3},
-                {"component_id": 4, "component_key": "cluster-04", "numerator": 5, "denominator": 7},
+                {"component_id": component3, "component_key": "cluster-03", "numerator": 1, "denominator": 3},
+                {"component_id": component4, "component_key": "cluster-04", "numerator": 5, "denominator": 7},
             ],
         )
 

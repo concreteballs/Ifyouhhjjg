@@ -69,6 +69,46 @@ class SpectralObjectStore:
             for statement in statements:
                 db.execute(statement)
             db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (6)")
+
+            migrated_v7 = db.execute(
+                "SELECT 1 FROM spectral_schema_migrations WHERE version = 7"
+            ).fetchone()
+            if not migrated_v7:
+                db.execute("""CREATE TABLE spectral_object_addresses_v7 (
+                    address_id INTEGER PRIMARY KEY,
+                    object_id TEXT NOT NULL REFERENCES spectral_objects(object_id),
+                    version INTEGER NOT NULL CHECK(version >= 1),
+                    address_value TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('active', 'retired')),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(object_id, version)
+                )""")
+                db.execute("""INSERT INTO spectral_object_addresses_v7
+                    SELECT address_id, object_id, version, address_value, status, created_at
+                    FROM spectral_object_addresses""")
+                db.execute("""CREATE TABLE spectral_object_address_segments_v7 (
+                    address_id INTEGER NOT NULL REFERENCES spectral_object_addresses_v7(address_id) ON DELETE CASCADE,
+                    segment_order INTEGER NOT NULL CHECK(segment_order >= 0),
+                    object_id TEXT NOT NULL REFERENCES spectral_objects(object_id),
+                    index_node_id TEXT NOT NULL REFERENCES spectral_index_nodes(node_id),
+                    PRIMARY KEY(address_id, segment_order),
+                    UNIQUE(address_id, object_id)
+                )""")
+                db.execute("""INSERT INTO spectral_object_address_segments_v7
+                    SELECT address_id, segment_order, object_id, index_node_id
+                    FROM spectral_object_address_segments""")
+                db.execute("DROP TABLE spectral_object_address_segments")
+                db.execute("DROP TABLE spectral_object_addresses")
+                db.execute("ALTER TABLE spectral_object_addresses_v7 RENAME TO spectral_object_addresses")
+                db.execute("ALTER TABLE spectral_object_address_segments_v7 RENAME TO spectral_object_address_segments")
+                db.execute("""CREATE UNIQUE INDEX spectral_object_one_active_address
+                    ON spectral_object_addresses(object_id) WHERE status = 'active'""")
+                db.execute("""CREATE UNIQUE INDEX spectral_object_active_address_value
+                    ON spectral_object_addresses(address_value) WHERE status = 'active'""")
+                db.execute("INSERT INTO spectral_schema_migrations(version) VALUES (7)")
+            else:
+                db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS spectral_object_active_address_value
+                    ON spectral_object_addresses(address_value) WHERE status = 'active'""")
             violations = db.execute("PRAGMA foreign_key_check").fetchall()
             if violations:
                 raise RuntimeError(f"foreign-key violations after object migration: {violations[:5]}")
@@ -127,6 +167,48 @@ class SpectralObjectStore:
 
     def _compose_address(self, chain):
         return "/".join(self._index_component(row[2]) for row in chain)
+
+
+    def _descendants(self, object_id):
+        result = []
+        queue = [object_id]
+        while queue:
+            current = queue.pop(0)
+            result.append(current)
+            queue.extend(row[0] for row in self.connection.execute(
+                "SELECT object_id FROM spectral_objects WHERE parent_object_id = ? "
+                "ORDER BY hierarchy_order, object_id", (current,)
+            ).fetchall())
+        return result
+
+    def _replace_active_addresses(self, object_ids):
+        db = self.connection
+        if not object_ids:
+            return
+        placeholders = ",".join("?" for _ in object_ids)
+        db.execute(
+            f"UPDATE spectral_object_addresses SET status = 'retired' "
+            f"WHERE status = 'active' AND object_id IN ({placeholders})", object_ids
+        )
+        for current in object_ids:
+            chain = self._parent_chain(current)
+            address_value = self._compose_address(chain)
+            version = db.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM spectral_object_addresses WHERE object_id = ?",
+                (current,)
+            ).fetchone()[0]
+            cursor = db.execute(
+                """INSERT INTO spectral_object_addresses
+                   (object_id, version, address_value, status)
+                   VALUES (?, ?, ?, 'active')""",
+                (current, version, address_value)
+            )
+            db.executemany(
+                """INSERT INTO spectral_object_address_segments
+                   (address_id, segment_order, object_id, index_node_id)
+                   VALUES (?, ?, ?, ?)""",
+                [(cursor.lastrowid, i, row[0], row[2]) for i, row in enumerate(chain)]
+            )
 
     def create_object(self, object_id, object_type, name, index_node_id,
                       parent_object_id=None, hierarchy_order=0):
@@ -198,44 +280,8 @@ class SpectralObjectStore:
                 "UPDATE spectral_objects SET index_node_id = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
                 (index_node_id, object_id)
             )
-            affected = []
-            queue = [object_id]
-            while queue:
-                current = queue.pop(0)
-                affected.append(current)
-                queue.extend(row[0] for row in db.execute(
-                    "SELECT object_id FROM spectral_objects WHERE parent_object_id = ? "
-                    "ORDER BY hierarchy_order, object_id", (current,)
-                ).fetchall())
-
-            # Retire snapshots first so the active-address uniqueness constraint
-            # is checked against the final, complete replacement set.
-            placeholders = ",".join("?" for _ in affected)
-            db.execute(
-                f"UPDATE spectral_object_addresses SET status = 'retired' "
-                f"WHERE status = 'active' AND object_id IN ({placeholders})",
-                affected
-            )
-            for current in affected:
-                chain = self._parent_chain(current)
-                address_value = self._compose_address(chain)
-                version = db.execute(
-                    "SELECT COALESCE(MAX(version), 0) + 1 FROM spectral_object_addresses WHERE object_id = ?",
-                    (current,)
-                ).fetchone()[0]
-                cursor = db.execute(
-                    """INSERT INTO spectral_object_addresses
-                       (object_id, version, address_value, status)
-                       VALUES (?, ?, ?, 'active')""",
-                    (current, version, address_value)
-                )
-                db.executemany(
-                    """INSERT INTO spectral_object_address_segments
-                       (address_id, segment_order, object_id, index_node_id)
-                       VALUES (?, ?, ?, ?)""",
-                    [(cursor.lastrowid, i, row[0], row[2])
-                     for i, row in enumerate(chain)]
-                )
+            affected = self._descendants(object_id)
+            self._replace_active_addresses(affected)
             db.execute("RELEASE SAVEPOINT update_object_index")
             if owns:
                 db.commit()
@@ -243,6 +289,78 @@ class SpectralObjectStore:
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT update_object_index")
             db.execute("RELEASE SAVEPOINT update_object_index")
+            if owns:
+                db.rollback()
+            raise
+
+
+    def rename_object(self, object_id, name):
+        """Rename an object without changing its stable identity or address."""
+        object_id = self._required(object_id, "object_id")
+        name = self._required(name, "name")
+        cursor = self.connection.execute(
+            "UPDATE spectral_objects SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
+            (name, object_id)
+        )
+        if cursor.rowcount != 1:
+            raise KeyError("object does not exist")
+        return self.get_object(object_id)
+
+    def reorder_object(self, object_id, hierarchy_order):
+        """Change sibling display order without changing the address."""
+        object_id = self._required(object_id, "object_id")
+        if isinstance(hierarchy_order, bool) or not isinstance(hierarchy_order, int):
+            raise ValueError("hierarchy_order must be an integer")
+        cursor = self.connection.execute(
+            "UPDATE spectral_objects SET hierarchy_order = ?, updated_at = CURRENT_TIMESTAMP WHERE object_id = ?",
+            (hierarchy_order, object_id)
+        )
+        if cursor.rowcount != 1:
+            raise KeyError("object does not exist")
+        return self.get_object(object_id)
+
+    def reparent_object(self, object_id, new_parent_object_id=None, hierarchy_order=None):
+        """Move an object subtree and version all affected addresses atomically."""
+        object_id = self._required(object_id, "object_id")
+        if new_parent_object_id is not None:
+            new_parent_object_id = self._required(new_parent_object_id, "new_parent_object_id")
+        if hierarchy_order is not None and (
+            isinstance(hierarchy_order, bool) or not isinstance(hierarchy_order, int)
+        ):
+            raise ValueError("hierarchy_order must be an integer")
+        db = self.connection
+        if db.execute("SELECT 1 FROM spectral_objects WHERE object_id = ?", (object_id,)).fetchone() is None:
+            raise KeyError("object does not exist")
+        if new_parent_object_id is not None and db.execute(
+            "SELECT 1 FROM spectral_objects WHERE object_id = ?", (new_parent_object_id,)
+        ).fetchone() is None:
+            raise KeyError("new parent object does not exist")
+        subtree = self._descendants(object_id)
+        if new_parent_object_id in subtree:
+            raise ValueError("reparenting would create an object hierarchy cycle")
+        current = db.execute(
+            "SELECT parent_object_id, hierarchy_order FROM spectral_objects WHERE object_id = ?",
+            (object_id,)
+        ).fetchone()
+        new_order = current[1] if hierarchy_order is None else hierarchy_order
+        if current[0] == new_parent_object_id and current[1] == new_order:
+            return self.get_object(object_id)
+        owns = not db.in_transaction
+        db.execute("SAVEPOINT reparent_spectral_object")
+        try:
+            db.execute(
+                """UPDATE spectral_objects SET parent_object_id = ?, hierarchy_order = ?,
+                   updated_at = CURRENT_TIMESTAMP WHERE object_id = ?""",
+                (new_parent_object_id, new_order, object_id)
+            )
+            self._replace_active_addresses(subtree)
+            db.execute("RELEASE SAVEPOINT reparent_spectral_object")
+            if owns:
+                db.commit()
+            return self.get_object(object_id)
+        except Exception:
+            db.execute("ROLLBACK TO SAVEPOINT reparent_spectral_object")
+            db.execute("RELEASE SAVEPOINT reparent_spectral_object")
             if owns:
                 db.rollback()
             raise
@@ -278,7 +396,7 @@ class SpectralObjectStore:
             raise KeyError("active spectral object address does not exist")
         segments = self.connection.execute(
             """SELECT s.segment_order, s.object_id, o.object_type, o.name,
-                      s.index_node_id
+                      s.index_node_id, o.index_node_id, o.parent_object_id
                FROM spectral_object_address_segments s
                JOIN spectral_objects o ON o.object_id = s.object_id
                WHERE s.address_id = ? ORDER BY s.segment_order""", (row[0],)
@@ -288,12 +406,15 @@ class SpectralObjectStore:
         expected = list(range(len(segments)))
         if [segment[0] for segment in segments] != expected:
             raise RuntimeError("address hierarchy segments are incomplete")
+        if segments[-1][1] != row[1]:
+            raise RuntimeError("address terminal segment does not match its object")
+        if segments[0][6] is not None:
+            raise RuntimeError("address hierarchy does not begin at a root object")
+        for segment in segments:
+            if segment[4] != segment[5]:
+                raise RuntimeError("active address snapshot index does not match current object index")
         for previous, current in zip(segments, segments[1:]):
-            parent = self.connection.execute(
-                "SELECT parent_object_id FROM spectral_objects WHERE object_id = ?",
-                (current[1],)
-            ).fetchone()[0]
-            if parent != previous[1]:
+            if current[6] != previous[1]:
                 raise RuntimeError("address segments do not match object parent hierarchy")
         return {
             "address": address_value, "object_id": row[1], "version": row[2],

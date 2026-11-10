@@ -346,6 +346,7 @@ class SpectralFieldStore:
         if not isinstance(path, str) or any(ch not in "01" for ch in path):
             raise ValueError("path must contain only 0 and 1")
         db = self.connection
+        owns_transaction = not db.in_transaction
         db.execute("SAVEPOINT split_spectral_index")
         try:
             parent = db.execute(
@@ -393,10 +394,14 @@ class SpectralFieldStore:
                     "upper": (end.numerator, end.denominator),
                 })
             db.execute("RELEASE SAVEPOINT split_spectral_index")
+            if owns_transaction:
+                db.commit()
             return result
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT split_spectral_index")
             db.execute("RELEASE SAVEPOINT split_spectral_index")
+            if owns_transaction:
+                db.rollback()
             raise
 
     def set_mix_component(self, index_node_id: str, component_id: int,

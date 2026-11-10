@@ -143,12 +143,15 @@ class SpectralExtensionStore:
             raise ValueError("unsupported reserved region type")
         if not isinstance(description, str):
             raise ValueError("description must be a string")
+        owns = not self.connection.in_transaction
         self.connection.execute(
             """INSERT INTO spectral_reserved_regions
                (region_id, region_type, name, description, metadata_json)
                VALUES (?, ?, ?, ?, ?)""",
             (region_id, region_type, name, description, self._json(metadata)))
-        self.connection.commit()
+        if owns:
+            if owns:
+            self.connection.commit()
         return self.get_reserved_region(region_id)
 
     def get_reserved_region(self, region_id):
@@ -163,6 +166,7 @@ class SpectralExtensionStore:
     def set_reserved_region_status(self, region_id, status):
         if status not in ("reserved", "planned", "released"):
             raise ValueError("unsupported reserved region status")
+        owns = not self.connection.in_transaction
         cur = self.connection.execute(
             """UPDATE spectral_reserved_regions SET status = ?, updated_at = CURRENT_TIMESTAMP
                WHERE region_id = ?""", (status, region_id))
@@ -180,12 +184,15 @@ class SpectralExtensionStore:
         if region_id is not None and self.connection.execute(
                 "SELECT 1 FROM spectral_reserved_regions WHERE region_id = ?", (region_id,)).fetchone() is None:
             raise KeyError("reserved region does not exist")
+        owns = not self.connection.in_transaction
         self.connection.execute(
             """INSERT INTO spectral_extension_points
                (point_id, region_id, point_type, name, object_id, coordinate_system_id, metadata_json)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (point_id, region_id, point_type, name, object_id, coordinate_system_id, self._json(metadata)))
-        self.connection.commit()
+        if owns:
+            if owns:
+            self.connection.commit()
         return self.get_extension_point(point_id)
 
     def get_extension_point(self, point_id):
@@ -202,6 +209,7 @@ class SpectralExtensionStore:
     def set_extension_point_status(self, point_id, status):
         if status not in ("planned", "available", "occupied", "disabled"):
             raise ValueError("unsupported extension point status")
+        owns = not self.connection.in_transaction
         cur = self.connection.execute(
             """UPDATE spectral_extension_points SET status = ?, updated_at = CURRENT_TIMESTAMP
                WHERE point_id = ?""", (status, point_id))
@@ -216,12 +224,14 @@ class SpectralExtensionStore:
         relation_type = self._required(relation_type, "relation_type")
         if source_object_id == target_object_id:
             raise ValueError("semantic self-links are not allowed")
+        owns = not self.connection.in_transaction
         self.connection.execute(
             """INSERT INTO spectral_semantic_links
                (link_id, source_object_id, target_object_id, relation_type, description, metadata_json)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (link_id, source_object_id, target_object_id, relation_type, description, self._json(metadata)))
-        self.connection.commit()
+        if owns:
+            self.connection.commit()
         return self.get_semantic_link(link_id)
 
     def get_semantic_link(self, link_id):
@@ -251,6 +261,7 @@ class SpectralExtensionStore:
         if (source_coordinate_system_id == target_coordinate_system_id
                 and source_object_id == target_object_id):
             raise ValueError("interspace link must connect distinct object-space endpoints")
+        owns = not self.connection.in_transaction
         self.connection.execute(
             """INSERT INTO spectral_interspace_links
                (link_id, source_object_id, target_object_id, source_coordinate_system_id,
@@ -258,7 +269,8 @@ class SpectralExtensionStore:
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (link_id, source_object_id, target_object_id, source_coordinate_system_id,
              target_coordinate_system_id, relation_type, self._json(metadata)))
-        self.connection.commit()
+        if owns:
+            self.connection.commit()
         return self.get_interspace_link(link_id)
 
     def get_interspace_link(self, link_id):
@@ -354,6 +366,7 @@ class SpectralExtensionStore:
                 "expected_digest": snapshot["digest_sha256"], "actual_digest": actual_digest}
 
     def compare_hierarchy_snapshot(self, snapshot_id):
+        owns = not self.connection.in_transaction
         snapshot = self.get_hierarchy_snapshot(snapshot_id)
         verification = self.verify_hierarchy_snapshot(snapshot_id)
         expected = {row[0]: row[1:] for row in self.connection.execute(
@@ -382,6 +395,8 @@ class SpectralExtensionStore:
                   "changed": changed, "snapshot_valid": verification["is_valid"],
                   "is_consistent": verification["is_valid"] and not (added or missing or changed)}
         self._record_event(snapshot_id, "comparison", report)
+        if owns:
+            self.connection.commit()
         return report
 
     def _record_event(self, snapshot_id, event_type, details):
@@ -399,12 +414,15 @@ class SpectralExtensionStore:
 
     def restore_hierarchy_snapshot(self, snapshot_id):
         """Restore captured attributes for extant objects; never delete later additions."""
+        db = self.connection
+        owns = not db.in_transaction
         snapshot_integrity = self.verify_hierarchy_snapshot(snapshot_id)
         if not snapshot_integrity["is_valid"]:
             self._record_event(snapshot_id, "recovery_rejected",
                                {"reason": "snapshot_checksum_mismatch",
                                 "verification": snapshot_integrity})
-            self.connection.commit()
+            if owns:
+                db.commit()
             raise ValueError("hierarchy snapshot checksum or object count is invalid")
         rows = self.connection.execute(
             """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
@@ -412,16 +430,15 @@ class SpectralExtensionStore:
                FROM spectral_hierarchy_snapshot_objects WHERE snapshot_id = ?
                ORDER BY length(COALESCE(parent_object_id, '')), object_id""",
             (snapshot_id,)).fetchall()
-        db = self.connection
         missing = [r[0] for r in rows if db.execute(
             "SELECT 1 FROM spectral_objects WHERE object_id = ?", (r[0],)).fetchone() is None]
         if missing:
             report = {"missing_objects": missing, "restored": [], "preserved_new_objects": True}
             self._record_event(snapshot_id, "recovery_rejected", report)
-            db.commit()
+            if owns:
+                db.commit()
             raise ValueError("snapshot recovery cannot recreate deleted object identities without an explicit identity policy")
         before = self.compare_hierarchy_snapshot(snapshot_id)
-        owns = not db.in_transaction
         db.execute("SAVEPOINT restore_hierarchy_snapshot")
         try:
             self._record_event(snapshot_id, "recovery_started", before)

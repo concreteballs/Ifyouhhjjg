@@ -117,3 +117,20 @@ Address resolution validates that the active snapshot's index nodes still match 
 \n## Object coordinate transforms and root access (package 2 completion)\n\n
 Object positions use the same coordinate-system definitions and exact rational values as shade positions. The object API exposes `apply_transform_to_object(object_id, transform_id)`, which evaluates a previously stored affine transform in the object's coordinate system and returns derived coordinates. It does not overwrite canonical object coordinates, object identity, or spectral addresses. A transform belonging to another coordinate system cannot be applied because the object must have a complete position in the transform's declared system.\n\n
 Top-level objects are retrieved with `roots()`, ordered by `hierarchy_order` and then stable object ID. `children(parent_object_id)` is reserved for direct descendants and rejects `None`; this avoids ambiguity between an absent parent and a SQL `NULL` comparison.\n
+
+## Extension and integrity layer (migration version 8)
+
+Migration 8 adds database metadata for future growth without implementing runtime network behavior:
+
+- `spectral_reserved_regions` records reserved regions, planned guard-network placeholders and future spaces. Region status is descriptive metadata; it does not activate a protection mechanism.
+- `spectral_extension_points` records planned connection, dimension and integration points. Points can reference a reserved region, an existing object and/or a coordinate system.
+- `spectral_semantic_links` stores typed relationships between distinct objects. These are meaning-level database relations, not packet routes.
+- `spectral_interspace_links` records relations between object endpoints in explicitly named coordinate systems. It does not calculate a route or transform coordinates automatically.
+- `spectral_hierarchy_snapshots` and `spectral_hierarchy_snapshot_objects` store immutable, checksummed copies of object hierarchy and active addresses.
+- `spectral_integrity_events` records comparison and recovery outcomes.
+
+The API is exposed as `database.spectral_extensions` (class `SpectralExtensionStore`). It supports region and extension-point management, semantic/interspace link creation and lookup, hierarchy snapshot creation, comparison, event inspection and cautious recovery.
+
+Recovery restores captured attributes for objects that still exist. It does not silently recreate deleted object identities or delete objects added after the snapshot. Missing identities cause recovery to be rejected and recorded. Newly added objects are preserved and remain visible as discrepancies after recovery. This makes recovery non-destructive by default; identity recreation and destructive pruning require a separate explicit policy.
+
+This layer is database-only. It does not implement the guard network, network routing, meta-routing, packet forwarding, or the spectral adder.

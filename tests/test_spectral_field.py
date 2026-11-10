@@ -538,6 +538,8 @@ class SpectralFieldDatabaseTests(unittest.TestCase):
                                      "SC03-G00:")
         child = objects.create_object("obj-child", "section", "Products",
                                        "SC04-G02:", "obj-root", 0)
+        self.field.split_index("SC05-G03")
+        self.field.split_index("SC05-G03", "0")
         leaf = objects.create_object("obj-leaf", "page", "Item",
                                       "SC05-G03:01", "obj-child", 0)
         self.assertEqual(root["address"], "B05-G00")

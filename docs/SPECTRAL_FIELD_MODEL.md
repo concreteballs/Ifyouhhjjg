@@ -53,8 +53,8 @@ Only the seven primary clusters create `spectral_components`. Component IDs are 
 
 Coordinate systems are dimension-independent. Each system declares an ordered list of two or more named axes; the initial field uses:
 
-- X = cluster column (zero-based);
-- Y = gradient row (zero-based).
+- X = cluster column (zero-based), increasing from left to right;
+- Y = gradient row (zero-based), with row 0 at the top and row 9 at the bottom. The gradient coordinate therefore increases from top to bottom.
 
 The original `spectral_positions` table remains available for compatibility with existing two-dimensional consumers. Migration version 3 copies those values into `spectral_position_coordinates`, which stores one exact rational value per shade, coordinate system, and axis. New coordinate systems can define three or more dimensions without changing shade IDs or the initial 2D system.
 

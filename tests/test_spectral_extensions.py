@@ -1,3 +1,5 @@
+import hashlib
+import json
 import unittest
 
 from spectral_core import SpectralDatabase
@@ -146,6 +148,43 @@ class SpectralExtensionDatabaseTests(unittest.TestCase):
         self.assertIn("address_value", changed["fields"])
         with self.assertRaisesRegex(RuntimeError, "no active spectral address"):
             self.ext.create_hierarchy_snapshot("invalid-address-snapshot")
+
+    def test_snapshot_checksum_covers_scope_metadata_and_supports_legacy_rows(self):
+        self.ext.create_hierarchy_snapshot("scope-digest-1", root_object_id="root")
+        current = self.ext.verify_hierarchy_snapshot("scope-digest-1")
+        self.assertTrue(current["is_valid"])
+        self.assertEqual(current["digest_version"], 2)
+
+        self.db.connection.execute(
+            "UPDATE spectral_hierarchy_snapshots SET root_object_id = ? WHERE snapshot_id = ?",
+            ("child", "scope-digest-1")
+        )
+        self.db.connection.commit()
+        self.assertFalse(self.ext.verify_hierarchy_snapshot("scope-digest-1")["is_valid"])
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            self.ext.restore_hierarchy_snapshot("scope-digest-1")
+
+        self.ext.create_hierarchy_snapshot("legacy-digest-1")
+        rows = self.db.connection.execute(
+            """SELECT object_id, object_type, name, parent_object_id, hierarchy_order,
+                      index_node_id, address_value
+               FROM spectral_hierarchy_snapshot_objects
+               WHERE snapshot_id = ? ORDER BY object_id""",
+            ("legacy-digest-1",)
+        ).fetchall()
+        serial = [list(row) for row in rows]
+        legacy_digest = hashlib.sha256(json.dumps(
+            serial, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+        self.db.connection.execute(
+            "UPDATE spectral_hierarchy_snapshots SET digest_version = 1, digest_sha256 = ? "
+            "WHERE snapshot_id = ?",
+            (legacy_digest, "legacy-digest-1")
+        )
+        self.db.connection.commit()
+        legacy = self.ext.verify_hierarchy_snapshot("legacy-digest-1")
+        self.assertTrue(legacy["is_valid"])
+        self.assertEqual(legacy["digest_version"], 1)
 
     def test_snapshot_checksum_is_verified_and_corruption_blocks_recovery(self):
         self.ext.create_hierarchy_snapshot("checksum-1")

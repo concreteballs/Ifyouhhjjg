@@ -46,6 +46,12 @@ class SpectralFieldStore:
     def _migrate_and_seed(self):
         db = self.connection
         db.execute("PRAGMA foreign_keys = ON")
+        db.execute("PRAGMA busy_timeout = 30000")
+        owns_transaction = not db.in_transaction
+        if owns_transaction:
+            # Acquire the write reservation before reading schema state. This avoids
+            # deferred-transaction lock-up when several connections initialize at once.
+            db.execute("BEGIN IMMEDIATE")
         db.execute("SAVEPOINT spectral_field_v1")
         try:
             # Upgrade the earlier additive schema without discarding stored mix data.
@@ -248,9 +254,13 @@ class SpectralFieldStore:
                 db.execute("DROP TABLE spectral_mix_components_legacy_v1")
             db.execute("INSERT OR IGNORE INTO spectral_schema_migrations(version) VALUES (1), (2)")
             db.execute("RELEASE SAVEPOINT spectral_field_v1")
+            if owns_transaction:
+                db.commit()
         except Exception:
             db.execute("ROLLBACK TO SAVEPOINT spectral_field_v1")
             db.execute("RELEASE SAVEPOINT spectral_field_v1")
+            if owns_transaction:
+                db.rollback()
             raise
 
     def clusters(self) -> List[Dict]:

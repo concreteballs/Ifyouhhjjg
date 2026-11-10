@@ -358,16 +358,28 @@ class SpectralFieldStore:
             raise KeyError("mixing component does not exist")
         if not component[0]:
             raise PermissionError("service clusters cannot participate in mixing")
-        self.connection.execute(
-            """INSERT INTO spectral_mix_components
-               (index_node_id, component_id, coefficient_numerator, coefficient_denominator)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(index_node_id, component_id) DO UPDATE SET
-                 coefficient_numerator = excluded.coefficient_numerator,
-                 coefficient_denominator = excluded.coefficient_denominator""",
-            (index_node_id, component_id, fraction.numerator, fraction.denominator),
-        )
-        self.connection.commit()
+        db = self.connection
+        owns_transaction = not db.in_transaction
+        db.execute("SAVEPOINT set_spectral_mix_component")
+        try:
+            db.execute(
+                """INSERT INTO spectral_mix_components
+                   (index_node_id, component_id, coefficient_numerator, coefficient_denominator)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(index_node_id, component_id) DO UPDATE SET
+                     coefficient_numerator = excluded.coefficient_numerator,
+                     coefficient_denominator = excluded.coefficient_denominator""",
+                (index_node_id, component_id, fraction.numerator, fraction.denominator),
+            )
+            db.execute("RELEASE SAVEPOINT set_spectral_mix_component")
+            if owns_transaction:
+                db.commit()
+        except Exception:
+            db.execute("ROLLBACK TO SAVEPOINT set_spectral_mix_component")
+            db.execute("RELEASE SAVEPOINT set_spectral_mix_component")
+            if owns_transaction:
+                db.rollback()
+            raise
 
     def mix_components(self, index_node_id: str) -> List[Dict]:
         rows = self.connection.execute(

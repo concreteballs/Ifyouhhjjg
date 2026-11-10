@@ -27,7 +27,7 @@ class SpectralGeometryStore:
                 shade_id TEXT NOT NULL REFERENCES spectral_shades(shade_id),
                 coordinate_system_id TEXT NOT NULL,
                 axis_order INTEGER NOT NULL,
-                numerator INTEGER NOT NULL,
+                numerator TEXT NOT NULL,
                 denominator TEXT NOT NULL,
                 PRIMARY KEY(shade_id, coordinate_system_id, axis_order),
                 FOREIGN KEY(coordinate_system_id, axis_order)

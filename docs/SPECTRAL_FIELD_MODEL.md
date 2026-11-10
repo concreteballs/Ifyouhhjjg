@@ -124,15 +124,15 @@ Object positions use the same coordinate-system definitions and exact rational v
 Top-level objects are retrieved with `roots()`, ordered by `hierarchy_order` and then stable object ID. `children(parent_object_id)` is reserved for direct descendants and rejects `None`; this avoids ambiguity between an absent parent and a SQL `NULL` comparison.
 
 
-## Extension and integrity layer (migration version 8)
+## Extension and integrity layer (migrations 8–9)
 
-Migration 8 adds database metadata for future growth without implementing runtime network behavior:
+Migration 8 adds database metadata for future growth without implementing runtime network behavior. Migration 9 versions the hierarchy-snapshot checksum format while preserving existing version-1 snapshots:
 
 - `spectral_reserved_regions` records reserved regions, planned guard-network placeholders and future spaces. Region status is descriptive metadata; it does not activate a protection mechanism.
 - `spectral_extension_points` records planned connection, dimension and integration points. Points can reference a reserved region, an existing object and/or a coordinate system.
 - `spectral_semantic_links` stores typed relationships between distinct objects. These are meaning-level database relations, not packet routes.
 - `spectral_interspace_links` records relations between object endpoints in explicitly named coordinate systems. It does not calculate a route or transform coordinates automatically.
-- `spectral_hierarchy_snapshots` and `spectral_hierarchy_snapshot_objects` store checksummed copies of object hierarchy and active addresses. `verify_hierarchy_snapshot` recomputes the SHA-256 digest and object count; comparison reports snapshot validity, and recovery is rejected if the stored snapshot has been altered. Snapshots may cover the full hierarchy or one root object's subtree; scoped comparisons ignore unrelated objects outside that subtree. A scoped recovery checks the address prefix supplied by ancestors outside the snapshot and rejects recovery if that external context has changed. The SHA-256 digest detects accidental snapshot-row changes; it is not an authenticated signature against an actor who can also rewrite the digest.
+- `spectral_hierarchy_snapshots` and `spectral_hierarchy_snapshot_objects` store checksummed copies of object hierarchy and active addresses. `verify_hierarchy_snapshot` recomputes the SHA-256 digest and object count. New version-2 digests bind the snapshot ID, root scope, object count and captured rows; existing version-1 row-only digests remain readable. Comparison reports snapshot validity, and recovery is rejected if the stored snapshot or its version-2 scope metadata has been altered. Snapshots may cover the full hierarchy or one root object's subtree; scoped comparisons ignore unrelated objects outside that subtree. A scoped recovery checks the address prefix supplied by ancestors outside the snapshot and rejects recovery if that external context has changed. The SHA-256 digest detects accidental snapshot-row changes; it is not an authenticated signature against an actor who can also rewrite the digest.
 - `spectral_integrity_events` records comparison and recovery outcomes.
 
 The API is exposed as `database.spectral_extensions` (class `SpectralExtensionStore`). It supports region and extension-point management, semantic/interspace link creation and lookup, hierarchy snapshot creation, comparison, event inspection and cautious recovery.
